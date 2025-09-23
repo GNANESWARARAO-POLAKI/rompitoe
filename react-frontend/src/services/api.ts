@@ -1,0 +1,266 @@
+import axios from 'axios';
+import { 
+  LoginCredentials, 
+  LoginResponse, 
+  ExamData, 
+  SubmissionData, 
+  SubmissionResponse,
+  User,
+  AdminLoginCredentials,
+  AdminLoginResponse,
+  ScoresResponse
+} from '../types';
+
+// Create an axios instance with base URL
+const api = axios.create({
+  baseURL: 'http://localhost:5000',
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
+
+// Add interceptor to add token to every request
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// API service functions
+export const apiService = {
+  // Check if API is running
+  checkHealth: async () => {
+    try {
+      const response = await api.get('/');
+      return response.data;
+    } catch (error) {
+      console.error('Health check failed:', error);
+      throw error;
+    }
+  },
+
+  // Login user
+  login: async (credentials: LoginCredentials): Promise<LoginResponse> => {
+    try {
+      const response = await api.post<LoginResponse>('/login', credentials);
+      // Save token and user data to localStorage
+      if (response.data.token) {
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+        
+        // If it's an admin user, also set the adminAuthenticated flag
+        if (response.data.user && response.data.user.is_admin) {
+          localStorage.setItem('adminAuthenticated', 'true');
+        }
+      }
+      return response.data;
+    } catch (error) {
+      console.error('Login failed:', error);
+      throw error;
+    }
+  },
+
+  // Admin login
+  adminLogin: async (password: string): Promise<AdminLoginResponse> => {
+    try {
+      // First clear any existing authentication
+      localStorage.removeItem('token');
+      localStorage.removeItem('adminAuthenticated');
+      localStorage.removeItem('user');
+      
+      const response = await api.post<AdminLoginResponse>('/admin-login', { password });
+      console.log('Admin login response:', response.data);
+      
+      // Save token to localStorage
+      if (response.data.token) {
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('adminAuthenticated', 'true');
+        
+        // Store user data if it's available in the response
+        if (response.data.user) {
+          localStorage.setItem('user', JSON.stringify(response.data.user));
+        }
+      }
+      return response.data;
+    } catch (error) {
+      console.error('Admin login failed:', error);
+      throw error;
+    }
+  },
+
+  // Logout (clear token)
+  logout: () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('adminAuthenticated');
+    // Also clear exam state
+    localStorage.removeItem('questionStates');
+    localStorage.removeItem('examStartTime');
+  },
+
+  // Get exam questions
+  getQuestions: async (): Promise<ExamData> => {
+    try {
+      const response = await api.get<ExamData>('/questions');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch questions:', error);
+      throw error;
+    }
+  },
+
+  // Submit exam
+  submitExam: async (submission: SubmissionData): Promise<SubmissionResponse> => {
+    try {
+      const response = await api.post<SubmissionResponse>('/submit', submission);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to submit exam:', error);
+      throw error;
+    }
+  },
+
+  // Upload files (for admin)
+  uploadFiles: async (userFile: File, examFile: File) => {
+    try {
+      const formData = new FormData();
+      formData.append('user_file', userFile);
+      formData.append('exam_file', examFile);
+
+      const response = await api.post('/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Upload failed:', error);
+      throw error;
+    }
+  },
+
+  // Get all scores (for admin)
+  getScores: async (): Promise<ScoresResponse> => {
+    try {
+      const response = await api.get<ScoresResponse>('/scores');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch scores:', error);
+      throw error;
+    }
+  },
+
+  // Download scores as CSV (for admin)
+  downloadScores: async () => {
+    try {
+      // Get the token from localStorage
+      const token = localStorage.getItem('token');
+      
+      // Create a link and download the file with authorization header
+      const a = document.createElement('a');
+      a.href = `http://localhost:5000/download-scores`;
+      a.download = 'exam_scores.csv';
+      
+      // Create an AJAX request with the authorization header
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', a.href);
+      xhr.responseType = 'blob';
+      
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      }
+      
+      xhr.onload = function() {
+        if (xhr.status === 200) {
+          const blob = new Blob([xhr.response], { type: 'text/csv' });
+          const url = URL.createObjectURL(blob);
+          a.href = url;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      };
+      
+      xhr.send();
+      return true;
+    } catch (error) {
+      console.error('Download failed:', error);
+      throw error;
+    }
+  },
+
+  // Check if user is authenticated
+  isAuthenticated: (): boolean => {
+    const token = localStorage.getItem('token');
+    console.log('Token in localStorage:', token ? 'exists' : 'not found');
+    if (!token) return false;
+    
+    // Check if token has expired
+    try {
+      // JWT tokens are in the format xxxxx.yyyyy.zzzzz
+      // The middle part (payload) contains the expiration time
+      const payload = token.split('.')[1];
+      
+      // Safeguard against malformed tokens
+      if (!payload) {
+        console.error('Invalid token format - missing payload');
+        localStorage.removeItem('token');
+        localStorage.removeItem('adminAuthenticated');
+        return false;
+      }
+      
+      const decodedPayload = JSON.parse(atob(payload));
+      console.log('Token payload:', decodedPayload);
+      
+      // Check if token has expired
+      if (decodedPayload.exp && decodedPayload.exp * 1000 < Date.now()) {
+        console.log('Token expired, clearing authentication');
+        // Token has expired, clear it
+        localStorage.removeItem('token');
+        localStorage.removeItem('adminAuthenticated');
+        return false;
+      }
+      
+      return true;
+    } catch (e) {
+      console.error('Error decoding token:', e);
+      // If there's an error parsing the token, it's likely invalid
+      localStorage.removeItem('token');
+      localStorage.removeItem('adminAuthenticated');
+      return false;
+    }
+  },
+
+  // Check if user is admin
+  isAdmin: (): boolean => {
+    const isAdminFlag = localStorage.getItem('adminAuthenticated') === 'true';
+    const hasToken = !!localStorage.getItem('token');
+    
+    // Also check the user object if available
+    let isAdminFromUser = false;
+    try {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        isAdminFromUser = user.is_admin === true;
+      }
+    } catch (e) {
+      console.error('Error parsing user data:', e);
+    }
+    
+    console.log('Admin check:', { isAdminFlag, isAdminFromUser, hasToken });
+    return (isAdminFlag || isAdminFromUser) && hasToken;
+  },
+
+  // Get current user
+  getCurrentUser: (): User | null => {
+    const user = localStorage.getItem('user');
+    return user ? JSON.parse(user) : null;
+  }
+};
+
+export default apiService;
