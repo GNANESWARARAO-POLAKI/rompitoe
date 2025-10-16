@@ -130,8 +130,8 @@
 }
 
 .question-button.active {
-  background-color: white !important;
-  color: #333;
+  background-color: blue !important;
+  color: #ffffff;
   border: 2px solid currentColor;
 }
 

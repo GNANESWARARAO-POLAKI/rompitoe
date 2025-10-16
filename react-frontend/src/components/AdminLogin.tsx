@@ -9,7 +9,6 @@ const AdminLogin: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   
-  // Check if already authenticated as admin
   useEffect(() => {
     // Force re-validation of token and admin status
     const checkAuth = () => {
