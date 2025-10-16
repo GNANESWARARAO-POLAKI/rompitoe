@@ -7,6 +7,7 @@ import Result from './components/Result';
 import AdminLogin from './components/AdminLogin';
 import AdminPanel from './components/AdminPanel';
 import ProtectedRoute from './components/ProtectedRoute';
+import TestList from './components/TestList';
 import './App.css';
 
 function App() {
@@ -16,7 +17,10 @@ function App() {
         <div className="App">
           <Routes>
             <Route path="/" element={<Login />} />
-            <Route path="/exam" element={
+            <Route path="/tests" element={
+              <ProtectedRoute element={<TestList />} />
+            } />
+            <Route path="/exam/:testId" element={
               <ProtectedRoute element={<ExamLayout />} />
             } />
             <Route path="/result" element={

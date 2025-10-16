@@ -122,3 +122,16 @@ python simple_app.py
 ```
 python db_app.py
 ```
+
+## Using a remote Postgres (Neon)
+
+To use Neon or any remote Postgres-compatible database set the environment variable `DATABASE_URL` before starting the server.
+
+Example (PowerShell):
+
+```powershell
+$env:DATABASE_URL = 'postgresql://neondb_owner:npg_DCX6yT7QGPkV@ep-flat-sky-adk5qvf1-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+python db_app.py
+```
+
+For convenience copy `.env.example` to `.env` and fill in values. Never commit secrets to source control.

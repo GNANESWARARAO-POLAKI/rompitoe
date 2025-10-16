@@ -12,7 +12,7 @@ interface ExamContextType {
   // User state
   user: User | null;
   setUser: (user: User | null) => void;
-  
+  // defaultProfilePicture?: "https://i.pinimg.com/736x/d6/64/b2/d664b27cca7eaf4d64c41622b5bb9b6c.jpg";
   // Exam data
   examData: ExamData | null;
   setExamData: (data: ExamData | null) => void;
@@ -40,6 +40,8 @@ interface ExamContextType {
   getCurrentQuestion: () => Question | undefined;
   getSectionQuestions: (sectionId: number) => Question[];
   getRemainingTime: () => number;
+  // Reset exam start time to now (useful when starting fresh)
+  resetExamStartTime: () => void;
 }
 
 const ExamContext = createContext<ExamContextType | undefined>(undefined);
@@ -66,15 +68,36 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
   
   // Time management
-  const [examStartTime] = useState<number>(() => {
-    const savedStartTime = localStorage.getItem('examStartTime');
-    return savedStartTime ? parseInt(savedStartTime) : Date.now();
-  });
+  // Exam duration (ms) - change if you want different duration
   const examDuration = 3 * 60 * 60 * 1000; // 3 hours in milliseconds
-  
-  // Save exam start time to localStorage
+
+  // Initialize examStartTime. If there's a saved start time in localStorage and it
+  // is still within the exam duration window, reuse it. Otherwise start a new timer.
+  const [examStartTime, setExamStartTime] = useState<number>(() => {
+    const saved = localStorage.getItem('examStartTime');
+    const now = Date.now();
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      if (!isNaN(parsed) && (now - parsed) < examDuration) {
+        return parsed;
+      }
+    }
+    // No valid saved start time or it expired -> use now
+    try {
+      localStorage.setItem('examStartTime', now.toString());
+    } catch (e) {
+      // ignore localStorage failures
+    }
+    return now;
+  });
+
+  // Keep localStorage in sync when examStartTime changes
   React.useEffect(() => {
-    localStorage.setItem('examStartTime', examStartTime.toString());
+    try {
+      localStorage.setItem('examStartTime', examStartTime.toString());
+    } catch (e) {
+      // ignore localStorage failures
+    }
   }, [examStartTime]);
   
   // Load exam data if user is already authenticated
@@ -133,6 +156,18 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (firstSection && firstSection.questions.length > 0) {
           setCurrentSectionId(firstSection.id);
           setCurrentQuestionId(firstSection.questions[0].question_id);
+        }
+      }
+
+      // If the saved exam start time (in localStorage) is missing or expired for
+      // this new exam data, reset it so the timer starts fresh and doesn't show 00:00:00.
+      const now = Date.now();
+      if ((now - examStartTime) >= examDuration) {
+        setExamStartTime(now);
+        try {
+          localStorage.setItem('examStartTime', now.toString());
+        } catch (e) {
+          // ignore localStorage errors
         }
       }
     }
@@ -202,8 +237,9 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setCurrentQuestionId(sectionQuestions[currentIndex + 1].question_id);
     } else if (currentSectionId < (examData?.sections.length || 0)) {
       // Go to first question of next section
-      setCurrentSectionId(currentSectionId + 1);
-      const nextSection = examData?.sections.find(s => s.id === currentSectionId + 1);
+      const nextSectionId = currentSectionId + 1;
+      setCurrentSectionId(nextSectionId);
+      const nextSection = examData?.sections.find(s => s.id === nextSectionId);
       if (nextSection && nextSection.questions.length > 0) {
         setCurrentQuestionId(nextSection.questions[0].question_id);
       }
@@ -231,12 +267,14 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setCurrentQuestionId(sectionQuestions[currentIndex - 1].question_id);
     } else if (currentSectionId > 1) {
       // Go to last question of previous section
-      setCurrentSectionId(currentSectionId - 1);
-      const prevSection = examData?.sections.find(s => s.id === currentSectionId - 1);
+      const prevSectionId = currentSectionId - 1;
+      setCurrentSectionId(prevSectionId);
+      const prevSection = examData?.sections.find(s => s.id === prevSectionId);
       if (prevSection && prevSection.questions.length > 0) {
         setCurrentQuestionId(prevSection.questions[prevSection.questions.length - 1].question_id);
       }
     }
+    // If we're at the first question of the first section, do nothing
   };
   
   const goToQuestion = (sectionId: number, questionId: number) => {
@@ -274,6 +312,16 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const elapsed = Date.now() - examStartTime;
     return Math.max(0, examDuration - elapsed);
   };
+
+  const resetExamStartTime = () => {
+    const now = Date.now();
+    setExamStartTime(now);
+    try {
+      localStorage.setItem('examStartTime', now.toString());
+    } catch (e) {
+      // ignore
+    }
+  };
   
   const value: ExamContextType = {
     user,
@@ -294,6 +342,8 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     getCurrentQuestion,
     getSectionQuestions,
     getRemainingTime
+    ,
+    resetExamStartTime
   };
   
   return <ExamContext.Provider value={value}>{children}</ExamContext.Provider>;

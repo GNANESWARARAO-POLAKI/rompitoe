@@ -15,7 +15,16 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # Configure app
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///exam_app.db'
+# Read database URL from environment variable `DATABASE_URL` if provided.
+# When deploying to Neon (or another Postgres provider) set DATABASE_URL to
+# the full connection string (e.g. postgresql://user:pass@host/dbname?sslmode=require).
+db_url = os.environ.get('DATABASE_URL')
+if db_url:
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+else:
+    # Fallback to local sqlite for development
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///exam_app.db'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = 'your-secret-key-change-in-production'  # Change this in production
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)  # Shorter expiration for security
@@ -33,14 +42,27 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
 # Initialize extensions
-db = SQLAlchemy(app)
+try:
+    db = SQLAlchemy(app)
+except Exception:
+    # Helpful debug output for failures during engine creation
+    print('\nERROR: Failed to initialize SQLAlchemy engine')
+    try:
+        print('DATABASE_URL =', os.environ.get('DATABASE_URL'))
+    except Exception:
+        print('Could not read DATABASE_URL from environment')
+    import traceback as _tb
+    _tb.print_exc()
+    raise
+
 jwt = JWTManager(app)
 
 # Define database models
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.String(50), unique=True, nullable=False)
-    password_hash = db.Column(db.String(128))  # For admin users
+    # Use Text for password_hash to support long hashed values (scrypt, bcrypt, etc.)
+    password_hash = db.Column(db.Text)
     dob = db.Column(db.String(10), nullable=False)
     name = db.Column(db.String(100))
     is_admin = db.Column(db.Boolean, default=False)
@@ -59,15 +81,45 @@ class User(db.Model):
             'is_admin': self.is_admin
         }
 
+# New Test model to support multiple tests
+class Test(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    duration_minutes = db.Column(db.Integer, default=60)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_active = db.Column(db.Boolean, default=True)
+    sections = db.relationship('Section', backref='test', lazy=True)
+    submissions = db.relationship('Submission', backref='test', lazy=True)
+    
+    def to_dict(self, include_sections=False):
+        result = {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'duration_minutes': self.duration_minutes,
+            'created_at': self.created_at.isoformat(),
+            'is_active': self.is_active
+        }
+        
+        if include_sections:
+            result['sections'] = [section.to_dict() for section in self.sections]
+            
+        return result
+
 class Section(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
+    test_id = db.Column(db.Integer, db.ForeignKey('test.id'), nullable=False)  # Link to Test
+    order = db.Column(db.Integer, default=0)  # Order within the test
     questions = db.relationship('Question', backref='section', lazy=True)
     
     def to_dict(self):
         return {
             'id': self.id,
             'name': self.name,
+            'test_id': self.test_id,
+            'order': self.order,
             'questions': [q.to_dict(include_answer=False) for q in self.questions]
         }
 
@@ -105,6 +157,7 @@ class Question(db.Model):
 class Submission(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    test_id = db.Column(db.Integer, db.ForeignKey('test.id'), nullable=False)  # Link to Test
     answers = db.Column(db.Text, nullable=False)  # Stored as JSON
     score_points = db.Column(db.Integer, nullable=False)
     score_total = db.Column(db.Integer, nullable=False)
@@ -115,6 +168,8 @@ class Submission(db.Model):
         return {
             'id': self.id,
             'user_id': self.user.user_id,
+            'test_id': self.test_id,
+            'test_name': self.test.name,
             'answers': json.loads(self.answers),
             'score': {
                 'points': self.score_points,
@@ -128,6 +183,168 @@ class Submission(db.Model):
 @app.route('/')
 def index():
     return jsonify({'message': 'Rompit OE API is running'}), 200
+
+# Test management endpoints
+@app.route('/tests', methods=['GET'])
+@jwt_required()
+def get_tests():
+    """Get all tests (admin) or active tests (regular user)"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    # Admin sees all tests, regular users see only active tests
+    if user.is_admin:
+        tests = Test.query.all()
+    else:
+        tests = Test.query.filter_by(is_active=True).all()
+    
+    tests_data = []
+    for test in tests:
+        test_data = test.to_dict()
+        # Add additional info like number of sections and questions
+        test_data['sections_count'] = Section.query.filter_by(test_id=test.id).count()
+        test_data['questions_count'] = Question.query.join(Section).filter(Section.test_id == test.id).count()
+        tests_data.append(test_data)
+    
+    return jsonify({
+        'tests': tests_data
+    }), 200
+
+@app.route('/active-tests', methods=['GET'])
+def get_active_tests():
+    """Get all active tests for student login (no authentication required)"""
+    tests = Test.query.filter_by(is_active=True).all()
+    tests_data = []
+    
+    for test in tests:
+        test_data = test.to_dict()
+        # Add basic info for display
+        test_data['title'] = test.name
+        test_data['description'] = test.description
+        tests_data.append(test_data)
+    
+    return jsonify({'tests': tests_data}), 200
+
+@app.route('/tests/<int:test_id>', methods=['GET'])
+@jwt_required()
+def get_test(test_id):
+    """Get a specific test with all its sections and questions"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    test = Test.query.get(test_id)
+    
+    if not test:
+        return jsonify({'error': 'Test not found'}), 404
+    
+    # Check if user is allowed to access this test
+    if not user.is_admin and not test.is_active:
+        return jsonify({'error': 'Test not available'}), 403
+    
+    return jsonify({
+        'test': test.to_dict(include_sections=True)
+    }), 200
+
+@app.route('/tests', methods=['POST'])
+@jwt_required()
+def create_test():
+    """Create a new test (admin only)"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user or not user.is_admin:
+        return jsonify({'error': 'Admin privileges required'}), 403
+    
+    data = request.json
+    
+    if not data or not data.get('name'):
+        return jsonify({'error': 'Test name is required'}), 400
+    
+    test = Test(
+        name=data.get('name'),
+        description=data.get('description', ''),
+        duration_minutes=data.get('duration_minutes', 60),
+        is_active=data.get('is_active', True)
+    )
+    
+    db.session.add(test)
+    db.session.commit()
+    
+    return jsonify({
+        'message': 'Test created successfully',
+        'test': test.to_dict()
+    }), 201
+
+@app.route('/tests/<int:test_id>', methods=['PUT'])
+@jwt_required()
+def update_test(test_id):
+    """Update a test (admin only)"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user or not user.is_admin:
+        return jsonify({'error': 'Admin privileges required'}), 403
+    
+    test = Test.query.get(test_id)
+    
+    if not test:
+        return jsonify({'error': 'Test not found'}), 404
+    
+    data = request.json
+    
+    if data.get('name'):
+        test.name = data.get('name')
+    
+    if 'description' in data:
+        test.description = data.get('description')
+    
+    if 'duration_minutes' in data:
+        test.duration_minutes = data.get('duration_minutes')
+    
+    if 'is_active' in data:
+        test.is_active = data.get('is_active')
+    
+    db.session.commit()
+    
+    return jsonify({
+        'message': 'Test updated successfully',
+        'test': test.to_dict()
+    }), 200
+
+@app.route('/tests/<int:test_id>', methods=['DELETE'])
+@jwt_required()
+def delete_test(test_id):
+    """Delete a test (admin only)"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user or not user.is_admin:
+        return jsonify({'error': 'Admin privileges required'}), 403
+    
+    test = Test.query.get(test_id)
+    
+    if not test:
+        return jsonify({'error': 'Test not found'}), 404
+    
+    # Delete associated sections and questions
+    for section in test.sections:
+        for question in section.questions:
+            db.session.delete(question)
+        db.session.delete(section)
+    
+    # Delete test
+    db.session.delete(test)
+    db.session.commit()
+    
+    return jsonify({
+        'message': 'Test deleted successfully'
+    }), 200
 
 @app.route('/upload', methods=['POST'])
 @jwt_required()
@@ -144,6 +361,16 @@ def upload_files():
         return jsonify({'error': 'Admin privileges required'}), 403
     
     try:
+        # Check if test_id is provided
+        test_id = request.form.get('test_id')
+        if not test_id:
+            return jsonify({'error': 'Test ID is required'}), 400
+        
+        # Check if test exists
+        test = Test.query.get(test_id)
+        if not test:
+            return jsonify({'error': 'Test not found'}), 404
+        
         if 'user_file' not in request.files or 'exam_file' not in request.files:
             return jsonify({'error': 'Both user_file and exam_file are required'}), 400
         
@@ -189,15 +416,23 @@ def upload_files():
         # Process exam file
         exam_df = pd.read_excel(exam_path, sheet_name=None)  # Get all sheets
         
-        # Delete all existing questions and sections
-        Question.query.delete()
-        Section.query.delete()
+        # Delete all existing questions and sections for this test
+        for section in test.sections:
+            for question in section.questions:
+                db.session.delete(question)
+            db.session.delete(section)
         
         questions_count = 0
+        section_order = 0
         
         for sheet_name, sheet_df in exam_df.items():
             # Create section
-            section = Section(name=sheet_name)
+            section_order += 1
+            section = Section(
+                name=sheet_name,
+                test_id=test.id,
+                order=section_order
+            )
             db.session.add(section)
             db.session.flush()  # To get the section ID
             
@@ -344,11 +579,31 @@ def admin_login():
 @app.route('/questions', methods=['GET'])
 @jwt_required()
 def get_questions():
-    """Return all questions grouped by sections"""
-    sections = Section.query.all()
+    """Return questions for a specific test"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    # Get test_id from query parameters
+    test_id = request.args.get('test_id')
+    if not test_id:
+        return jsonify({'error': 'Test ID is required'}), 400
+    
+    # Check if test exists and user has access
+    test = Test.query.get(test_id)
+    if not test:
+        return jsonify({'error': 'Test not found'}), 404
+    
+    if not user.is_admin and not test.is_active:
+        return jsonify({'error': 'Test not available'}), 403
+    
+    # Get sections for this test ordered by order
+    sections = Section.query.filter_by(test_id=test.id).order_by(Section.order).all()
     
     if not sections:
-        return jsonify({'error': 'No questions available'}), 404
+        return jsonify({'error': 'No questions available for this test'}), 404
     
     result = []
     for section in sections:
@@ -361,13 +616,14 @@ def get_questions():
         })
     
     return jsonify({
+        'test': test.to_dict(),
         'sections': result
     }), 200
 
 @app.route('/submit', methods=['POST'])
 @jwt_required()
 def submit_exam():
-    """Submit user answers"""
+    """Submit user answers for a specific test"""
     current_user_id = get_jwt_identity()
     user = User.query.filter_by(user_id=current_user_id).first()
     
@@ -376,16 +632,28 @@ def submit_exam():
     
     data = request.json
     
-    if not data or 'answers' not in data:
-        return jsonify({'error': 'answers are required'}), 400
+    if not data or 'answers' not in data or 'test_id' not in data:
+        return jsonify({'error': 'answers and test_id are required'}), 400
+    
+    test_id = data['test_id']
+    test = Test.query.get(test_id)
+    
+    if not test:
+        return jsonify({'error': 'Test not found'}), 404
     
     answers = data['answers']
     
+    # Get all questions for this test
+    test_sections = Section.query.filter_by(test_id=test_id).all()
+    section_ids = [section.id for section in test_sections]
+    
     # Calculate score
-    questions = Question.query.all()
+    questions = Question.query.filter(Question.section_id.in_(section_ids)).all()
     score = 0
     total = len(questions)
     
+    if total == 0:
+        return jsonify({'error': 'No questions found for this test'}), 404
     for question in questions:
         question_id = str(question.id)
         if question_id in answers and answers[question_id] == question.correct_answer:
@@ -396,6 +664,7 @@ def submit_exam():
     # Store submission
     submission = Submission(
         user_id=user.id,
+        test_id=test_id,
         answers=json.dumps(answers),
         score_points=score,
         score_total=total,
@@ -408,6 +677,8 @@ def submit_exam():
     return jsonify({
         'message': 'Exam submitted successfully',
         'submission_id': submission.id,
+        'test_id': test_id,
+        'test_name': test.name,
         'score': {
             'points': score,
             'total': total,
@@ -418,14 +689,20 @@ def submit_exam():
 @app.route('/scores', methods=['GET'])
 @jwt_required()
 def get_scores():
-    """Get all submission scores (admin only)"""
+    """Get submission scores (admin only), optionally filtered by test_id"""
     current_user_id = get_jwt_identity()
     user = User.query.filter_by(user_id=current_user_id).first()
     
     if not user or not user.is_admin:
         return jsonify({'error': 'Admin privileges required'}), 403
     
-    submissions = Submission.query.all()
+    # Optional test_id filter
+    test_id = request.args.get('test_id')
+    
+    if test_id:
+        submissions = Submission.query.filter_by(test_id=test_id).all()
+    else:
+        submissions = Submission.query.all()
     
     return jsonify({
         'submissions': [sub.to_dict() for sub in submissions]
@@ -495,6 +772,39 @@ def check_database_schema():
                 connection.execute(db.text("ALTER TABLE question ADD COLUMN section_order INTEGER DEFAULT 0"))
                 connection.commit()
                 print("Column added successfully!")
+    
+    # Check if the section table exists
+    if 'section' in inspector.get_table_names():
+        # Check if test_id column exists in the section table
+        columns = [column['name'] for column in inspector.get_columns('section')]
+        if 'test_id' not in columns:
+            print("Adding missing test_id column to section table...")
+            with db.engine.connect() as connection:
+                # Add a default test record if it doesn't exist
+                test_exists = connection.execute(db.text("SELECT COUNT(*) FROM test")).scalar()
+                if test_exists == 0:
+                    print("Creating default test...")
+                    # Use named parameters compatible with SQLAlchemy / psycopg2
+                    connection.execute(
+                        db.text(
+                            "INSERT INTO test (name, description, duration_minutes, is_active) VALUES (:name, :description, :duration_minutes, :is_active)"
+                        ),
+                        {
+                            'name': "Default Test",
+                            'description': "Default test created during migration",
+                            'duration_minutes': 180,
+                            'is_active': 1
+                        }
+                    )
+                    connection.commit()
+                
+                # Get the ID of the first test (which should be the default one we just created)
+                default_test_id = connection.execute(db.text("SELECT id FROM test LIMIT 1")).scalar()
+                
+                # Add the test_id column with the default test ID
+                connection.execute(db.text(f"ALTER TABLE section ADD COLUMN test_id INTEGER DEFAULT {default_test_id} REFERENCES test(id)"))
+                connection.commit()
+                print("Column added successfully!")
 
 # Initialize database and create test data
 def initialize_database():
@@ -527,10 +837,26 @@ def initialize_database():
         )
         db.session.add(test_user)
     
+    # Add default test if none exists
+    default_test = Test.query.first()
+    if not default_test:
+        default_test = Test(
+            name='Default Test',
+            description='Default test for all sections and questions',
+            duration_minutes=180,
+            is_active=True
+        )
+        db.session.add(default_test)
+        db.session.commit()
+    
     # Add test sections and questions if none exist
     if Section.query.count() == 0:
         # Physics section
-        physics = Section(name='Physics')
+        physics = Section(
+            name='Physics',
+            test_id=default_test.id,
+            order=1
+        )
         db.session.add(physics)
         db.session.flush()
         
@@ -557,7 +883,11 @@ def initialize_database():
         ))
         
         # Chemistry section
-        chemistry = Section(name='Chemistry')
+        chemistry = Section(
+            name='Chemistry',
+            test_id=default_test.id,
+            order=2
+        )
         db.session.add(chemistry)
         db.session.flush()
         
@@ -573,7 +903,11 @@ def initialize_database():
         ))
         
         # Mathematics section
-        math = Section(name='Mathematics')
+        math = Section(
+            name='Mathematics',
+            test_id=default_test.id,
+            order=3
+        )
         db.session.add(math)
         db.session.flush()
         

@@ -54,23 +54,35 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
       </div>
       
       <div className="question-text">
-        {question.question}
+        {question.question.split('\\n').map((line, idx) => (
+          <React.Fragment key={idx}>
+        {line}
+        {idx < question.question.split('\\n').length - 1 && <br />}
+          </React.Fragment>
+        ))}
       </div>
       
       <div className="options-container">
         {Object.entries(question.options).map(([key, value]) => (
           <div 
-            key={key} 
-            className={`option ${isOptionSelected(key) ? 'selected' : ''}`}
-            onClick={() => handleOptionSelect(key)}
+        key={key} 
+        className={`option ${isOptionSelected(key) ? 'selected' : ''}`}
+        onClick={() => handleOptionSelect(key)}
           >
-            <div className="option-key">{key}</div>
-            <div className="option-value">{value}</div>
+        <div className="option-key">{key}</div>
+        <div className="option-value">
+          {value.split('\\n').map((line, idx) => (
+            <React.Fragment key={idx}>
+          {line}
+          {idx < value.split('\\n').length - 1 && <br />}
+            </React.Fragment>
+          ))}
+        </div>
           </div>
         ))}
       </div>
       
-      <div className="question-actions">
+      {/* <div className="question-actions">
         <button 
           className={`review-button ${questionState?.status === 'marked-for-review' ? 'active' : ''}`}
           onClick={handleMarkForReview}
@@ -88,7 +100,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               'Not Visited'}
           </span>
         </div>
-      </div>
+      </div> */}
     </div>
   );
 };

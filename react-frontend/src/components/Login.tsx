@@ -12,46 +12,36 @@ const Login: React.FC = () => {
   });
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
-  
+
   const navigate = useNavigate();
   const { setUser, setExamData, user } = useExam();
-  
+
   // Check if user is already authenticated
   useEffect(() => {
     const checkAuth = async () => {
       if (apiService.isAuthenticated() && !apiService.isAdmin()) {
         try {
-          // If there's a user in context, redirect to exam
+          // If there's a user in context, redirect to test list
           if (user) {
-            navigate('/exam');
+            navigate('/tests');
             return;
           }
-          
+
           // If there's a user in localStorage but not in context
           const storedUser = apiService.getCurrentUser();
           if (storedUser) {
             setUser(storedUser);
-            
-            // Load exam data if needed
-            try {
-              const examData = await apiService.getQuestions();
-              setExamData(examData);
-              navigate('/exam');
-            } catch (err) {
-              console.error('Failed to load exam data:', err);
-              // If loading exam data fails, clear token and stay on login page
-              apiService.logout();
-            }
+            navigate('/tests');
           }
         } catch (err) {
           console.error('Authentication check failed:', err);
         }
       }
     };
-    
+
     checkAuth();
   }, [navigate, setUser, setExamData, user]);
-  
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setCredentials(prev => ({
@@ -59,35 +49,31 @@ const Login: React.FC = () => {
       [name]: value
     }));
   };
-  
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    
+
     try {
       // Validate form
       if (!credentials.user_id || !credentials.dob) {
         setError('Please fill in all fields');
         return;
       }
-      
+
       // Format the date properly if needed
       const formattedCredentials = {
         ...credentials,
         // The date input already returns YYYY-MM-DD format which is what we need
       };
-      
+
       // Login user
       const response = await apiService.login(formattedCredentials);
       setUser(response.user);
-      
-      // Fetch exam data
-      const examData = await apiService.getQuestions();
-      setExamData(examData);
-      
-      // Navigate to exam page
-      navigate('/exam');
+
+      // Redirect to the test list page
+      navigate('/tests');
     } catch (err: any) {
       console.error('Login error:', err);
       setError(err.response?.data?.error || 'Failed to login. Please try again.');
@@ -95,15 +81,15 @@ const Login: React.FC = () => {
       setLoading(false);
     }
   };
-  
+
   return (
     <div className="login-container">
       <div className="login-card">
         <h2>Rompit Online Exam Platform</h2>
         <h3>Login</h3>
-        
+
         {error && <div className="error-message">{error}</div>}
-        
+
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label htmlFor="user_id">User ID</label>
@@ -117,7 +103,7 @@ const Login: React.FC = () => {
               disabled={loading}
             />
           </div>
-          
+
           <div className="form-group">
             <label htmlFor="dob">Date of Birth</label>
             <input
@@ -131,18 +117,18 @@ const Login: React.FC = () => {
             />
             <small className="form-help">Format: YYYY-MM-DD</small>
           </div>
-          
+
           <button type="submit" disabled={loading}>
             {loading ? 'Logging in...' : 'Login'}
           </button>
         </form>
-        
+
         <div className="login-info">
           <p>For testing, use:</p>
           <p>User ID: test123</p>
           <p>DOB: 2000-01-01 (January 1, 2000)</p>
         </div>
-        
+
         <div className="admin-link">
           <p>
             Are you an administrator?{' '}

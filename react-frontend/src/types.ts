@@ -9,6 +9,8 @@ export interface User {
   user_id: string;
   name: string;
   is_admin: boolean;
+  profilePicture?: string;
+  
 }
 
 export interface LoginResponse {
@@ -26,6 +28,17 @@ export interface AdminLoginResponse {
   message: string;
   token: string;
   user?: User;
+}
+
+export interface Test {
+  id: number;
+  name: string;  // Changed from title to name to match backend
+  description: string;
+  duration_minutes: number;
+  is_active: boolean;
+  created_at: string;
+  sections_count?: number;
+  questions_count?: number;
 }
 
 export interface Question {
@@ -49,6 +62,10 @@ export interface Section {
 }
 
 export interface ExamData {
+  test_id: number;
+  title: string;  // Keep 'title' here since the backend API for questions returns 'title'
+  description: string;
+  duration_minutes: number;
   sections: Section[];
 }
 
@@ -67,6 +84,7 @@ export type AnswersMap = Record<string, string>;
 export interface SubmissionData {
   user_id?: string;
   answers: Record<string, string>;
+  test_id: number;
 }
 
 export interface Score {
@@ -85,6 +103,8 @@ export interface ScoreResult {
 export interface SubmissionResponse {
   message: string;
   submission_id: number;
+  test_id: number;
+  test_name: string;
   score: Score;
 }
 
