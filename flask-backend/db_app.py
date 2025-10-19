@@ -15,12 +15,15 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # Configure app
-# Read database URL from environment variable `DATABASE_URL` (required).
-# Set DATABASE_URL to your Postgres connection string in production.
+# Read database URL from environment variable `DATABASE_URL` if provided.
+# Falls back to local SQLite for development if DATABASE_URL is not set.
+# In production (Render), always set DATABASE_URL to your Postgres connection string.
 db_url = os.environ.get('DATABASE_URL')
-if not db_url:
-    raise ValueError('DATABASE_URL environment variable is required')
-app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+if db_url:
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+else:
+    # Fallback to local sqlite for development
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///exam_app.db'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = 'your-secret-key-change-in-production'  # Change this in production
