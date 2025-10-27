@@ -13,11 +13,15 @@ import {
 } from '../types';
 
 // Create an axios instance with base URL
+// Uses localhost for development, Render for production
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'https://rompitoe.onrender.com',
+  baseURL: process.env.NODE_ENV === 'development' 
+    ? 'http://127.0.0.1:5000' 
+    : (process.env.REACT_APP_API_URL || 'https://rompitoe.onrender.com'),
   headers: {
     'Content-Type': 'application/json'
-  }
+  },
+  timeout: 60000 // 60 seconds timeout for Render free tier wake-up
 });
 
 // Add interceptor to add token to every request
@@ -30,6 +34,26 @@ api.interceptors.request.use(
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+// Add response interceptor to handle 502 errors (Render free tier wake-up)
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    
+    // If we get a 502 (Bad Gateway) and haven't retried yet
+    if (error.response?.status === 502 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      
+      // Wait 5 seconds for Render to wake up, then retry
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      return api(originalRequest);
+    }
+    
+    return Promise.reject(error);
+  }
 );
 
 // API service functions
@@ -132,7 +156,7 @@ export const apiService = {
   },
 
   // Get a specific test by ID
-  getTestById: async (testId: number) => {
+  ById: async (testId: number) => {
     try {
       const response = await api.get(`/tests/${testId}`);
       return response.data.test;

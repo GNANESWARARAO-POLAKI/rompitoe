@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import pandas as pd
 import os
@@ -6,7 +6,15 @@ from werkzeug.utils import secure_filename
 import json
 from datetime import datetime
 
-app = Flask(__name__)
+CANDIDATE_BUILD = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'react-frontend', 'build'))
+if os.path.exists(CANDIDATE_BUILD):
+    # Serve directly from react-frontend/build when available.
+    # Use /static as the static_url_path so API endpoints (POST/PUT) at root
+    # are not intercepted by the static file rule which would cause 405 errors.
+    app = Flask(__name__, static_folder=CANDIDATE_BUILD, static_url_path='/static')
+else:
+    # Fall back to default static folder under flask-backend/static
+    app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # In-memory storage for demo purposes
@@ -22,8 +30,25 @@ if not os.path.exists(UPLOAD_FOLDER):
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
-@app.route('/')
-def index():
+@app.route('/', defaults={'path': ''}, methods=['GET'])
+@app.route('/<path:path>', methods=['GET'])
+def serve_react(path):
+    """
+    Serve React static files (copied into flask-backend/static).
+    If a requested static file exists, return it. Otherwise return index.html
+    so client-side routing works. If no build is present, fall back to a simple JSON message.
+    """
+    static_folder = app.static_folder or 'static'
+    # If the requested path matches a static file, serve it
+    if path != "" and os.path.exists(os.path.join(static_folder, path)):
+        return send_from_directory(static_folder, path)
+ 
+    # If index.html exists in the static folder, serve it (SPA entrypoint)
+    index_path = os.path.join(static_folder, 'index.html')
+    if os.path.exists(index_path):
+        return send_from_directory(static_folder, 'index.html')
+
+    # Fallback for API-only mode
     return jsonify({'message': 'Rompit OE API is running'}), 200
 
 @app.route('/upload', methods=['POST'])

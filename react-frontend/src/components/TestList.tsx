@@ -91,7 +91,6 @@ const TestList: React.FC = () => {
               <p className="test-description">{test.description}</p>
               <div className="test-details">
                 <span className="test-duration">Duration: {test.duration_minutes} minutes</span>
-                <span className="test-questions">{test.questions_count || 0} Questions</span>
               </div>
               <button className="start-test-button">Start Test</button>
             </div>

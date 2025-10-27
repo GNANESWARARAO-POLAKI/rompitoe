@@ -201,11 +201,21 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const index = newStates.findIndex(state => state.id === questionId);
       
       if (index !== -1) {
-        newStates[index] = {
-          ...newStates[index],
-          status,
-          ...(answer !== undefined ? { answer } : {})
-        };
+        // If answer is explicitly undefined, remove the answer field (clear it)
+        // Otherwise, update with the new answer value
+        if (answer === undefined) {
+          const { answer: _, ...restState } = newStates[index];
+          newStates[index] = {
+            ...restState,
+            status
+          };
+        } else {
+          newStates[index] = {
+            ...newStates[index],
+            status,
+            answer
+          };
+        }
       }
       
       // Save to localStorage
