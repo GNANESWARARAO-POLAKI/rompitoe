@@ -41,6 +41,7 @@ uploads/
 
 # Build
 build/
+static/
 dist/
 
 # Logs

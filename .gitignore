@@ -97,6 +97,10 @@ INSTRUCTIONS.md
 !Procfile
 !runtime.txt
 !vercel.json
+!render.yaml
+!ENROLLMENT_SYSTEM.md
+!REACT_FLASK_SERVING.md
+!DEPLOYMENT_GUIDE.md
 
 # Keep sample data folder structure but not large files
 !sample-data/

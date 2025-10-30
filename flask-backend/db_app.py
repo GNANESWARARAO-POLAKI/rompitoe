@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
@@ -180,10 +180,6 @@ class Submission(db.Model):
             'submitted_at': self.submitted_at.isoformat()
         }
 
-# Routes
-@app.route('/')
-def index():
-    return jsonify({'message': 'Rompit OE API is running'}), 200
 
 # Test management endpoints
 @app.route('/tests', methods=['GET'])
@@ -1366,6 +1362,52 @@ def initialize_database():
         ))
     
     db.session.commit()
+
+# ============================================================================
+# REACT BUILD SERVING - MUST BE AT THE END AFTER ALL API ROUTES
+# ============================================================================
+
+from flask import send_from_directory
+
+@app.route('/', defaults={'path': ''}, methods=['GET'])
+@app.route('/<path:path>', methods=['GET'])
+def serve_react(path):
+    """
+    Serve React build files for production deployment.
+    This MUST be at the end to avoid intercepting API routes.
+    
+    Order matters:
+    1. Flask checks routes in definition order
+    2. API routes are checked first
+    3. This catch-all route handles everything else (React app)
+    """
+    # Path to the React build folder
+    react_build = os.path.abspath(os.path.join(os.path.dirname(__file__), 'build'))
+    
+    # If build folder doesn't exist, return API status
+    if not os.path.exists(react_build):
+        return jsonify({
+            'status': 'running',
+            'message': 'Rompit OE API is running',
+            'note': 'React build not found. Run: npm run build in react-frontend'
+        }), 200
+    
+    # If requesting a specific file that exists, serve it
+    # send_from_directory handles the path correctly with base directory
+    if path:
+        file_path = os.path.join(react_build, path)
+        if os.path.exists(file_path):
+            return send_from_directory(react_build, path)
+    
+    # Otherwise, serve index.html for client-side routing
+    if os.path.exists(os.path.join(react_build, 'index.html')):
+        return send_from_directory(react_build, 'index.html')
+    
+    # Fallback if no index.html
+    return jsonify({
+        'error': 'React build incomplete',
+        'message': 'index.html not found in build folder'
+    }), 404
 
 if __name__ == '__main__':
     with app.app_context():
