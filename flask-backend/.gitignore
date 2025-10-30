@@ -40,8 +40,8 @@ uploads/
 *.csv
 
 # Build
-build/
-static/
+# build/  - Keep build folder for deployment
+# static/ - Keep static folder for deployment
 dist/
 
 # Logs

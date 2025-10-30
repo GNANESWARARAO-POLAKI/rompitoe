@@ -1,18 +1,12 @@
 services:
-  # Main web service - Flask backend + React frontend
+  # Main web service - Flask backend + React frontend (pre-built)
   - type: web
     name: rompit-oe
     runtime: python
     plan: free
     buildCommand: |
-      echo "Building React frontend..."
-      cd react-frontend
-      npm install
-      npm run build
-      echo "Copying build to Flask backend..."
-      cp -r build ../flask-backend/
-      cd ../flask-backend
       echo "Installing Python dependencies..."
+      cd flask-backend
       pip install -r requirements.txt
     startCommand: cd flask-backend && gunicorn db_app:app
     envVars:
@@ -24,8 +18,6 @@ services:
         generateValue: true
       - key: FLASK_ENV
         value: production
-      - key: PYTHON_VERSION
-        value: 3.12.0
 
 databases:
   # PostgreSQL database
