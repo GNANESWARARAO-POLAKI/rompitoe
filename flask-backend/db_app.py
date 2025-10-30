@@ -15,16 +15,13 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # Configure app
-# Read database URL from environment variable `DATABASE_URL` if provided.
-# Falls back to local SQLite for development if DATABASE_URL is not set.
-# In production (Render), always set DATABASE_URL to your Postgres connection string.
+# Always use Neon PostgreSQL database (no SQLite fallback)
 db_url = os.environ.get('DATABASE_URL')
-if db_url:
-    app.config['SQLALCHEMY_DATABASE_URI'] = db_url
-else:
-    # Fallback to local sqlite for development
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///exam_app.db'
+if not db_url:
+    # Hardcoded Neon database URL if environment variable not set
+    db_url = 'postgresql://neondb_owner:npg_ETjaJbR48Ovl@ep-tiny-smoke-a4uifbri-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require'
 
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = 'your-secret-key-change-in-production'  # Change this in production
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)  # Shorter expiration for security
