@@ -18,7 +18,7 @@ import {
 const getBaseURL = () => {
   // In production build, always use Render
   if (process.env.NODE_ENV === 'production') {
-    return 'https://rompit-oe.onrender.com';
+    return 'https://rompitoe.onrender.com';
   }
   // In development, use localhost
   return 'http://127.0.0.1:5000';
