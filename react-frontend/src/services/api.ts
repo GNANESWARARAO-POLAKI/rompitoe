@@ -13,11 +13,19 @@ import {
 } from '../types';
 
 // Create an axios instance with base URL
-// Uses localhost for development, Render for production
+// Production: Always use Render URL
+// Development: Use localhost
+const getBaseURL = () => {
+  // In production build, always use Render
+  if (process.env.NODE_ENV === 'production') {
+    return 'https://rompit-oe.onrender.com';
+  }
+  // In development, use localhost
+  return 'http://127.0.0.1:5000';
+};
+
 const api = axios.create({
-  baseURL: process.env.NODE_ENV === 'development' 
-    ? 'http://127.0.0.1:5000' 
-    : (process.env.REACT_APP_API_URL || 'https://rompitoe.onrender.com'),
+  baseURL: getBaseURL(),
   headers: {
     'Content-Type': 'application/json'
   },

@@ -11,17 +11,8 @@ services:
     startCommand: cd flask-backend && gunicorn db_app:app
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: rompit-oe-db
-          property: connectionString
+        value: postgresql://neondb_owner:npg_ETjaJbR48Ovl@ep-tiny-smoke-a4uifbri-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: FLASK_ENV
         value: production
-
-databases:
-  # PostgreSQL database
-  - name: rompit-oe-db
-    databaseName: rompit_oe
-    user: rompit_user
-    plan: free
