@@ -85,6 +85,13 @@ const Login: React.FC = () => {
   return (
     <div className="login-container">
       <div className="login-card">
+        <button 
+          className="back-button" 
+          onClick={() => navigate('/')}
+          aria-label="Back to home"
+        >
+          ← Back
+        </button>
         <h2>Rompit Online Exam Platform</h2>
         <h3>Login</h3>
 
@@ -122,21 +129,6 @@ const Login: React.FC = () => {
             {loading ? 'Logging in...' : 'Login'}
           </button>
         </form>
-
-        <div className="login-info">
-          <p>For testing, use:</p>
-          <p>User ID: test123</p>
-          <p>DOB: 2000-01-01 (January 1, 2000)</p>
-        </div>
-
-        <div className="admin-link">
-          <p>
-            Are you an administrator?{' '}
-            <a href="#" onClick={() => navigate('/admin')}>
-              Go to Admin Panel
-            </a>
-          </p>
-        </div>
       </div>
     </div>
   );

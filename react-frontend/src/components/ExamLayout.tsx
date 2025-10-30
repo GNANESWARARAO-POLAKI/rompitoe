@@ -3,9 +3,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import QuestionCard from './QuestionCard';
 import SidePanelNavigator from './SidePanelNavigator';
 import { useExam } from '../context/ExamContext';
+import { QuestionStatus } from '../types';
 import apiService from '../services/api';
 import './ExamLayout.css';
-// import { profile } from 'console';
 
 const ExamLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -33,6 +33,8 @@ const ExamLayout: React.FC = () => {
   const [submissionError, setSubmissionError] = useState<string>('');
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState<boolean>(false);
+  const [showFullscreenWarning, setShowFullscreenWarning] = useState<boolean>(false);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
   // Check if user is logged in and load exam data if needed
   useEffect(() => {
@@ -81,9 +83,10 @@ const ExamLayout: React.FC = () => {
     if (remaining === 0 && examData) {
       resetExamStartTime();
       // set displayed remaining to the full exam duration immediately.
-      // The context's start time update is async; using the duration constant
+      // The context's start time update is async; using the duration from examData
       // prevents a brief 00:00:00 display.
-      remaining = 3 * 60 * 60 * 1000; // match context's examDuration
+      const durationMinutes = examData.duration_minutes || 180; // Default to 180 minutes (3 hours)
+      remaining = durationMinutes * 60 * 1000; // Convert to milliseconds
     }
 
     setTimeRemaining(remaining);
@@ -105,6 +108,62 @@ const ExamLayout: React.FC = () => {
 
     return () => clearInterval(timer);
   }, [getRemainingTime, examData]);
+
+  // Fullscreen check and enforcement
+  useEffect(() => {
+    const checkFullscreen = () => {
+      const isCurrentlyFullscreen = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      
+      setIsFullscreen(isCurrentlyFullscreen);
+      
+      // Show warning if not in fullscreen
+      if (!isCurrentlyFullscreen && examData) {
+        setShowFullscreenWarning(true);
+      }
+    };
+
+    // Check immediately on mount
+    checkFullscreen();
+
+    // Listen for fullscreen changes
+    const handleFullscreenChange = () => {
+      checkFullscreen();
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, [examData]);
+
+  // Request fullscreen
+  const requestFullscreen = () => {
+    const elem = document.documentElement;
+    
+    if (elem.requestFullscreen) {
+      elem.requestFullscreen();
+    } else if ((elem as any).webkitRequestFullscreen) {
+      (elem as any).webkitRequestFullscreen();
+    } else if ((elem as any).mozRequestFullScreen) {
+      (elem as any).mozRequestFullScreen();
+    } else if ((elem as any).msRequestFullscreen) {
+      (elem as any).msRequestFullscreen();
+    }
+    
+    setShowFullscreenWarning(false);
+  };
 
   // Format time remaining
   const formatTime = (ms: number) => {
@@ -146,25 +205,30 @@ const ExamLayout: React.FC = () => {
         return;
       }
 
+      // Prepare question states for analysis
+      const statesMap: any = {};
+      questionStates.forEach(state => {
+        statesMap[state.id.toString()] = {
+          marked_for_review: state.status === 'marked-for-review'
+        };
+      });
+
       console.log('Submitting exam with answers:', answers);
       console.log('Test ID:', examData.test_id);
 
       const response = await apiService.submitExam({
         user_id: user.user_id,
         answers,
-        test_id: examData.test_id
+        test_id: examData.test_id,
+        question_states: statesMap
       });
 
       console.log('Submission response:', response);
 
-      // Redirect to result page with score data and test info
-      navigate('/result', {
+      // Redirect to result analysis page with complete data
+      navigate('/result-analysis', {
         state: {
-          score: response.score.percentage,
-          points: response.score.points,
-          total: response.score.total,
-          testId: response.test_id,
-          testTitle: response.test_name
+          analysisData: response
         }
       });
     } catch (err: any) {
@@ -201,20 +265,24 @@ const ExamLayout: React.FC = () => {
 
         </div>
         <div className="exam-info">
-          <h2>Rompit Online Exam</h2>
+          <h2>Rompit OE</h2>
+          <div className="exam-name">{examData.title}</div>
           <div className="user-info">
             <span>User ID: {user?.user_id}</span>
             {user?.name && <span>Name: {user.name}</span>}
           </div>
         </div>
 
-        <div className="timer-container">
+        <div className={`timer-container ${timeRemaining < 300000 ? 'low-time-container' : ''}`}>
           <div className="timer">
             Time Remaining: <span className={timeRemaining < 300000 ? 'low-time' : ''}>
               {formatTime(timeRemaining)}
             </span>
           </div>
         </div>
+
+        {/* Spacer to maintain layout balance */}
+        <div style={{ width: '80px' }}></div>
 
         <button
           className="submit-button"
@@ -226,7 +294,7 @@ const ExamLayout: React.FC = () => {
       </header>
 
       <div className="exam-content">
-        <div className="main-content">
+        <div className="main-content" style={{ padding: '0rem' ,marginRight: '0' }}>
           <div className="progress-bar-container">
             <div className="progress-label">Progress: {Math.round(calculateProgress())}%</div>
             <div className="progress-bar">
@@ -281,29 +349,54 @@ const ExamLayout: React.FC = () => {
             currentQuestionId === examData.sections[0]?.questions[0]?.question_id
           }
         >
-          Previous
+          <span className="btn-icon">←</span>
+          <span className="btn-text">Previous</span>
         </button>
 
         {currentQuestion && (
           <>
             <button
-              className={`nav-button mark-review ${questionStates.find(qs => qs.id === currentQuestion.id)?.status === 'marked-for-review'
+              className={`nav-button mark-review ${
+                ['marked-for-review', 'answered-marked'].includes(
+                  questionStates.find(qs => qs.id === currentQuestion.id)?.status || ''
+                )
                   ? 'active'
                   : ''
-                }`}
+              }`}
               onClick={() => {
                 const state = questionStates.find(qs => qs.id === currentQuestion.id);
-                const newStatus = state?.status === 'marked-for-review'
-                  ? (state?.answer ? 'answered' : 'not-answered')
-                  : 'marked-for-review';
+                const currentStatus = state?.status || 'not-visited';
+                const hasAnswer = !!state?.answer;
+                
+                let newStatus: QuestionStatus;
+                
+                if (currentStatus === 'marked-for-review' || currentStatus === 'answered-marked') {
+                  // Unmarking: if has answer, set to 'answered', else 'not-answered'
+                  newStatus = hasAnswer ? 'answered' : 'not-answered';
+                } else {
+                  // Marking: if has answer, set to 'answered-marked', else 'marked-for-review'
+                  newStatus = hasAnswer ? 'answered-marked' : 'marked-for-review';
+                }
 
                 updateQuestionState(currentQuestion.id, newStatus, state?.answer);
               }}
             >
-              {questionStates.find(qs => qs.id === currentQuestion.id)?.status === 'marked-for-review'
-                ? 'Unmark for Review'
-                : 'Mark for Review'
-              }
+              <span className="btn-icon">
+                {['marked-for-review', 'answered-marked'].includes(
+                  questionStates.find(qs => qs.id === currentQuestion.id)?.status || ''
+                )
+                  ? '★'
+                  : '☆'
+                }
+              </span>
+              <span className="btn-text">
+                {['marked-for-review', 'answered-marked'].includes(
+                  questionStates.find(qs => qs.id === currentQuestion.id)?.status || ''
+                )
+                  ? 'Unmark Review'
+                  : 'Mark Review'
+                }
+              </span>
             </button>
             
             {/* New Clear Answer button */}
@@ -317,24 +410,19 @@ const ExamLayout: React.FC = () => {
               }}
               disabled={!questionStates.find(qs => qs.id === currentQuestion.id)?.answer}
             >
-              Clear Answer
+              <span className="btn-icon">×</span>
+              <span className="btn-text">Clear Answer</span>
             </button>
           </>
         )}
 
-        {/* Disable Next button on last question */}
+        {/* Save & Next button - always enabled, wraps to first question if at the end */}
         <button
           className="nav-button next"
           onClick={goToNextQuestion}
-          disabled={
-            // Disable if it's the last question of the last section
-            currentSectionId === examData.sections[examData.sections.length - 1]?.id &&
-            currentQuestionId === examData.sections[examData.sections.length - 1]?.questions[
-              examData.sections[examData.sections.length - 1]?.questions.length - 1
-            ]?.question_id
-          }
         >
-          Next
+          <span className="btn-text">Save & Next</span>
+          <span className="btn-icon">→</span>
         </button>
       </div>
 
@@ -388,6 +476,38 @@ const ExamLayout: React.FC = () => {
                 {isSubmitting ? 'Submitting...' : 'Confirm Submit'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fullscreen Warning Dialog */}
+      {showFullscreenWarning && (
+        <div className="fullscreen-overlay">
+          <div className="fullscreen-dialog">
+            <div className="fullscreen-icon">⚠️</div>
+            <h2>Fullscreen Required</h2>
+            <p>
+              For a better exam experience and to prevent distractions, 
+              this exam must be taken in fullscreen mode.
+            </p>
+            <div className="fullscreen-benefits">
+              <p><strong>Benefits of fullscreen mode:</strong></p>
+              <ul>
+                <li>✓ Minimize distractions</li>
+                <li>✓ Better focus on questions</li>
+                <li>✓ More screen space for content</li>
+                <li>✓ Professional exam environment</li>
+              </ul>
+            </div>
+            <p className="fullscreen-note">
+              <strong>Note:</strong> Press <kbd>F11</kbd> or <kbd>Esc</kbd> anytime to exit fullscreen.
+            </p>
+            <button 
+              className="fullscreen-button"
+              onClick={requestFullscreen}
+            >
+              Enter Fullscreen Mode
+            </button>
           </div>
         </div>
       )}

@@ -1,0 +1,105 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environments
+venv/
+env/
+ENV/
+myvenv/
+newenv/
+myvnv/
+newvnv/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+instance/
+exam_app.db
+rompit_oe.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp/
+.pnp.js
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+.vercel/
+
+# Uploads and user data
+uploads/
+flask-backend/uploads/
+
+# Logs
+*.log
+logs/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# Images (except required assets)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.ico
+*.svg
+
+# Documentation drafts (keep main docs)
+plan.md
+newplan.md
+INSTRUCTIONS.md
+
+# Keep these important files
+!README.md
+!LICENSE
+!.gitignore
+!requirements.txt
+!package.json
+!tsconfig.json
+!Procfile
+!runtime.txt
+!vercel.json
+
+# Keep sample data folder structure but not large files
+!sample-data/
+!sample-data/*.py
+!sample-data/*.ipynb
+!sample-data/README.md

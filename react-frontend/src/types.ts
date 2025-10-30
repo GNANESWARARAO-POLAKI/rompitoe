@@ -70,7 +70,7 @@ export interface ExamData {
 }
 
 // Question state types for the UI
-export type QuestionStatus = 'not-visited' | 'not-answered' | 'answered' | 'marked-for-review';
+export type QuestionStatus = 'not-visited' | 'not-answered' | 'answered' | 'marked-for-review' | 'answered-marked';
 
 export interface QuestionState {
   id: number;
@@ -85,6 +85,11 @@ export interface SubmissionData {
   user_id?: string;
   answers: Record<string, string>;
   test_id: number;
+  question_states?: {
+    [questionId: string]: {
+      marked_for_review: boolean;
+    };
+  };
 }
 
 export interface Score {
@@ -111,6 +116,8 @@ export interface SubmissionResponse {
 export interface SubmissionRecord {
   id: number;
   user_id: string;
+  test_id: number;
+  test_name: string;
   answers: Record<string, string>;
   score: Score;
   submitted_at: string;

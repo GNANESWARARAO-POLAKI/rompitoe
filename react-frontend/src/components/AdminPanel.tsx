@@ -2,32 +2,24 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiService from '../services/api';
 import { Test } from '../types';
-import './AdminPanel.css';
+import './AdminDashboard.css';
+import './AnalysisCharts.css';
 
 const AdminPanel: React.FC = () => {
   const navigate = useNavigate();
-  const [userFile, setUserFile] = useState<File | null>(null);
-  const [examFile, setExamFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [message, setMessage] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [scoreData, setScoreData] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'tests' | 'upload' | 'scores'>('tests');
+  const [activeTab, setActiveTab] = useState<'tests' | 'scores' | 'analysis'>('tests');
   const [tests, setTests] = useState<Test[]>([]);
   const [selectedTest, setSelectedTest] = useState<Test | null>(null);
-  const [newTest, setNewTest] = useState<{
-    name: string;
-    description: string;
-    duration_minutes: number;
-    is_active: boolean;
-  }>({
-    name: '',
-    description: '',
-    duration_minutes: 60,
-    is_active: true
-  });
-  const [isEditingTest, setIsEditingTest] = useState<boolean>(false);
+  const [sortField, setSortField] = useState<'percentage' | 'submitted_at'>('submitted_at');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [analysisData, setAnalysisData] = useState<any>(null);
+  const [notAttemptedPage, setNotAttemptedPage] = useState<number>(1);
+  const [notAttemptedPageSize] = useState<number>(10);
 
   // Check admin authentication
   useEffect(() => {
@@ -35,7 +27,6 @@ const AdminPanel: React.FC = () => {
     if (!isAuthenticated) {
       navigate('/admin');
     } else {
-      // Fetch tests when component mounts
       fetchTests();
     }
   }, [navigate]);
@@ -45,7 +36,7 @@ const AdminPanel: React.FC = () => {
     if (activeTab === 'scores' && selectedTest) {
       fetchScores(selectedTest.id);
     }
-  }, [activeTab, selectedTest?.id]); // Add selectedTest.id as a dependency
+  }, [activeTab, selectedTest?.id]);
 
   const fetchTests = async () => {
     setIsLoading(true);
@@ -65,14 +56,14 @@ const AdminPanel: React.FC = () => {
     }
   };
 
-  // Add this function to handle tab changes
-  const handleTabChange = (tab: 'tests' | 'upload' | 'scores') => {
+  const handleTabChange = (tab: 'tests' | 'scores' | 'analysis') => {
     setActiveTab(tab);
-    // If switching to scores tab, fetch the scores
     if (tab === 'scores' && selectedTest) {
       fetchScores(selectedTest.id);
     }
-    // Clear any messages when switching tabs
+    if (tab === 'analysis' && selectedTest) {
+      fetchAnalysisData(selectedTest.id);
+    }
     setMessage('');
     setError('');
   };
@@ -92,64 +83,91 @@ const AdminPanel: React.FC = () => {
     }
   };
 
-  const handleUserFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setUserFile(e.target.files[0]);
-    }
-  };
-
-  const handleExamFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setExamFile(e.target.files[0]);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!selectedTest) {
-      setError('Please select a test before uploading files.');
-      return;
-    }
-
-    if (!userFile && !examFile) {
-      setError('Please select at least one file to upload.');
-      return;
-    }
-
+  const fetchAnalysisData = async (testId: number) => {
     setIsLoading(true);
     setError('');
-    setMessage('');
+    setNotAttemptedPage(1); // Reset pagination when fetching new data
 
     try {
-      const response = await apiService.uploadFiles(userFile, examFile, selectedTest.id);
-      console.log('Upload response:', response);
-
-      let successMessage = 'Files uploaded successfully!';
-      if (response.users_count) {
-        successMessage += ` ${response.users_count} users processed.`;
-      }
-      if (response.questions_count) {
-        successMessage += ` ${response.questions_count} questions processed.`;
-      }
-
-      setMessage(successMessage);
-
-      // Reset file inputs after successful upload
-      setUserFile(null);
-      setExamFile(null);
-
-      // Clear any file input elements
-      const userFileInput = document.getElementById('user-file') as HTMLInputElement;
-      const examFileInput = document.getElementById('exam-file') as HTMLInputElement;
-      if (userFileInput) userFileInput.value = '';
-      if (examFileInput) examFileInput.value = '';
+      const response = await apiService.getTestAnalysis(testId);
+      const submissions = response.submissions;
+      
+      const analysis = calculateAnalysisMetrics(submissions, response.participation);
+      setAnalysisData(analysis);
     } catch (error: any) {
-      console.error('Upload error:', error);
-      setError(error.response?.data?.error || 'Failed to upload files. Please check file format and try again.');
+      console.error('Failed to fetch analysis data:', error);
+      setError(error.response?.data?.error || 'Failed to fetch analysis data.');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const calculateAnalysisMetrics = (submissions: any[], participationData: any) => {
+    const result: any = {
+      participation: participationData,
+      totalSubmissions: submissions.length,
+      scoreDistribution: null,
+      performance: null,
+      timeDistribution: null,
+    };
+
+    if (submissions.length === 0) {
+      return result;
+    }
+
+    const totalSubmissions = submissions.length;
+    const percentages = submissions.map(s => s.score.percentage);
+    
+    const avgScore = percentages.reduce((a, b) => a + b, 0) / totalSubmissions;
+    const highestScore = Math.max(...percentages);
+    const lowestScore = Math.min(...percentages);
+    
+    const scoreBuckets = {
+      '0-25': percentages.filter(p => p >= 0 && p <= 25).length,
+      '26-50': percentages.filter(p => p > 25 && p <= 50).length,
+      '51-75': percentages.filter(p => p > 50 && p <= 75).length,
+      '76-100': percentages.filter(p => p > 75 && p <= 100).length,
+    };
+
+    const passCutoff = 35;
+    const passCount = percentages.filter(p => p >= passCutoff).length;
+    const failCount = totalSubmissions - passCount;
+
+    result.scoreDistribution = {
+      average: avgScore.toFixed(1),
+      highest: highestScore.toFixed(1),
+      lowest: lowestScore.toFixed(1),
+      buckets: scoreBuckets,
+      passCount: passCount,
+      failCount: failCount,
+      passRate: ((passCount / totalSubmissions) * 100).toFixed(1),
+      failRate: ((failCount / totalSubmissions) * 100).toFixed(1),
+      passCutoff,
+      totalSubmissions,
+    };
+
+    if (totalSubmissions >= 5) {
+      const sortedByPercentage = [...submissions].sort((a, b) => b.score.percentage - a.score.percentage);
+      const top10PercentIndex = Math.max(1, Math.ceil(totalSubmissions * 0.1));
+      const bottom20PercentIndex = Math.max(0, Math.floor(totalSubmissions * 0.8));
+      
+      result.performance = {
+        topPerformers: sortedByPercentage.slice(0, top10PercentIndex),
+        strugglingUsers: bottom20PercentIndex < totalSubmissions ? sortedByPercentage.slice(bottom20PercentIndex) : [],
+      };
+    }
+
+    const submissionTimes = submissions.map(s => new Date(s.submitted_at));
+    const timeOfDayDistribution = {
+      morning: submissionTimes.filter(d => d.getHours() >= 6 && d.getHours() < 12).length,
+      afternoon: submissionTimes.filter(d => d.getHours() >= 12 && d.getHours() < 18).length,
+      evening: submissionTimes.filter(d => d.getHours() >= 18 && d.getHours() < 24).length,
+      night: submissionTimes.filter(d => d.getHours() >= 0 && d.getHours() < 6).length,
+    };
+
+    result.timeDistribution = timeOfDayDistribution;
+
+    return result;
   };
 
   const handleDownloadScores = async () => {
@@ -157,66 +175,11 @@ const AdminPanel: React.FC = () => {
     setError('');
 
     try {
-      console.log('Initiating download...');
       await apiService.downloadScores();
-      console.log('Download initiated');
-      // Downloading is handled by the browser redirecting to the download URL
     } catch (error: any) {
-      console.error('Download error:', error);
       setError(error.response?.data?.error || 'Failed to download scores.');
     } finally {
       setIsDownloading(false);
-    }
-  };
-
-  const handleCreateTest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
-
-    try {
-      if (!newTest.name.trim()) {
-        throw new Error('Test name is required');
-      }
-
-      await apiService.createTest(newTest);
-      setMessage('Test created successfully!');
-      setNewTest({
-        name: '',
-        description: '',
-        duration_minutes: 60,
-        is_active: true
-      });
-      fetchTests();  // Refresh the test list
-    } catch (error: any) {
-      console.error('Create test error:', error);
-      setError(error.message || error.response?.data?.error || 'Failed to create test.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleUpdateTest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedTest) return;
-
-    setIsLoading(true);
-    setError('');
-
-    try {
-      if (!newTest.name.trim()) {
-        throw new Error('Test name is required');
-      }
-
-      await apiService.updateTest(selectedTest.id, newTest);
-      setMessage('Test updated successfully!');
-      setIsEditingTest(false);
-      fetchTests();  // Refresh the test list
-    } catch (error: any) {
-      console.error('Update test error:', error);
-      setError(error.message || error.response?.data?.error || 'Failed to update test.');
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -234,423 +197,693 @@ const AdminPanel: React.FC = () => {
       if (selectedTest?.id === testId) {
         setSelectedTest(null);
       }
-      fetchTests();  // Refresh the test list
+      fetchTests();
     } catch (error: any) {
-      console.error('Delete test error:', error);
       setError(error.response?.data?.error || 'Failed to delete test.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleEditTest = (test: Test) => {
-    setSelectedTest(test);
-    setNewTest({
-      name: test.name,
-      description: test.description,
-      duration_minutes: test.duration_minutes,
-      is_active: test.is_active
-    });
-    setIsEditingTest(true);
-    handleTabChange('tests');
-  };
-
-  const cancelEditTest = () => {
-    setIsEditingTest(false);
-    setNewTest({
-      name: '',
-      description: '',
-      duration_minutes: 60,
-      is_active: true
-    });
-  };
-
   const handleLogout = () => {
-    // Use the API service's logout function
     apiService.logout();
     navigate('/admin');
   };
 
+  const handleSort = (field: 'percentage' | 'submitted_at') => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
+  const getSortedScores = () => {
+    return [...scoreData].sort((a, b) => {
+      let aValue, bValue;
+      
+      if (sortField === 'percentage') {
+        aValue = a.score.percentage;
+        bValue = b.score.percentage;
+      } else {
+        aValue = new Date(a.submitted_at).getTime();
+        bValue = new Date(b.submitted_at).getTime();
+      }
+      
+      if (sortDirection === 'asc') {
+        return aValue - bValue;
+      } else {
+        return bValue - aValue;
+      }
+    });
+  };
+
+  const getPaginatedNotAttemptedUsers = () => {
+    if (!analysisData?.participation?.not_attempted_users) {
+      return [];
+    }
+    const users = analysisData.participation.not_attempted_users;
+    const startIndex = (notAttemptedPage - 1) * notAttemptedPageSize;
+    const endIndex = startIndex + notAttemptedPageSize;
+    return users.slice(startIndex, endIndex);
+  };
+
+  const getTotalNotAttemptedPages = () => {
+    if (!analysisData?.participation?.not_attempted_users) {
+      return 0;
+    }
+    return Math.ceil(analysisData.participation.not_attempted_users.length / notAttemptedPageSize);
+  };
+
+  const handleNextNotAttemptedPage = () => {
+    const totalPages = getTotalNotAttemptedPages();
+    if (notAttemptedPage < totalPages) {
+      setNotAttemptedPage(notAttemptedPage + 1);
+    }
+  };
+
+  const handlePrevNotAttemptedPage = () => {
+    if (notAttemptedPage > 1) {
+      setNotAttemptedPage(notAttemptedPage - 1);
+    }
+  };
+
   return (
-    <div className="admin-container">
-      <div className="admin-header">
-        <h1>Rompit OE Admin Panel</h1>
-        <div className="admin-actions">
+    <div className="admin-dashboard">
+      <aside className="admin-sidebar">
+        <div className="sidebar-header">
+          <div className="logo">
+            <span className="logo-icon">🎓</span>
+            <h2>Rompit OE</h2>
+          </div>
+          <p className="sidebar-subtitle">Admin Dashboard</p>
+        </div>
+
+        <nav className="sidebar-nav">
           <button
-            className="logout-button"
-            onClick={handleLogout}
+            className={`nav-item ${activeTab === 'tests' ? 'active' : ''}`}
+            onClick={() => handleTabChange('tests')}
           >
-            Logout
+            <span className="nav-icon">📋</span>
+            <span className="nav-label">Manage Tests</span>
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'scores' ? 'active' : ''}`}
+            onClick={() => handleTabChange('scores')}
+          >
+            <span className="nav-icon">📊</span>
+            <span className="nav-label">View Scores</span>
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'analysis' ? 'active' : ''}`}
+            onClick={() => handleTabChange('analysis')}
+          >
+            <span className="nav-icon">📈</span>
+            <span className="nav-label">Test Analysis</span>
+          </button>
+        </nav>
+
+        <div className="sidebar-footer">
+          <button className="logout-btn" onClick={handleLogout}>
+            <span className="logout-icon">🚪</span>
+            <span>Logout</span>
           </button>
         </div>
-      </div>
+      </aside>
 
-      <div className="admin-tabs">
-        <button
-          className={`tab-button ${activeTab === 'tests' ? 'active' : ''}`}
-          onClick={() => handleTabChange('tests')}
-        >
-          Manage Tests
-        </button>
-        <button
-          className={`tab-button ${activeTab === 'upload' ? 'active' : ''}`}
-          onClick={() => handleTabChange('upload')}
-        >
-          Upload Data
-        </button>
-        <button
-          className={`tab-button ${activeTab === 'scores' ? 'active' : ''}`}
-          onClick={() => handleTabChange('scores')}
-        >
-          View Scores
-        </button>
-      </div>
+      <main className="admin-main">
+        <div className="main-header">
+          <div className="header-content">
+            <h1>
+              {activeTab === 'tests' ? 'Tests Management' : activeTab === 'scores' ? 'Student Scores' : 'Test Analysis'}
+            </h1>
+            <p className="breadcrumb">
+              Dashboard / {activeTab === 'tests' ? 'Tests' : activeTab === 'scores' ? 'Scores' : 'Analysis'}
+            </p>
+          </div>
+        </div>
 
-      <div className="admin-content">
-        {activeTab === 'tests' && (
-          <div className="admin-card">
-            <h2>Manage Tests</h2>
+        <div className="main-content">
+          {message && (
+            <div className="success-message">
+              <span className="message-icon">✓</span>
+              {message}
+            </div>
+          )}
+          {error && (
+            <div className="error-message">
+              <span className="message-icon">⚠</span>
+              {error}
+            </div>
+          )}
 
-            {message && <div className="success-message">{message}</div>}
-            {error && <div className="error-message">{error}</div>}
-
-            <div className="tests-container">
-              <div className="tests-list">
-                <h3>Available Tests</h3>
-                {isLoading ? (
-                  <div className="loading">Loading tests...</div>
-                ) : tests.length === 0 ? (
-                  <div className="no-data">No tests found. Create a new test to get started.</div>
-                ) : (
-                  <ul className="test-list">
-                    {tests.map(test => (
-                      <li
-                        key={test.id}
-                        className={`test-item ${selectedTest?.id === test.id ? 'selected' : ''}`}
-                        onClick={() => setSelectedTest(test)}
-                      >
-                        <div className="test-item-title">
-                          <span>{test.name}</span>
-                          <span className={`status-badge ${test.is_active ? 'active' : 'inactive'}`}>
-                            {test.is_active ? 'Active' : 'Inactive'}
-                          </span>
-                        </div>
-                        <div className="test-item-meta">
-                          <span>Questions: {test.questions_count || 0}</span>
-                          <span>Duration: {test.duration_minutes} min</span>
-                        </div>
-                        <div className="test-item-actions">
-                          <button
-                            type="button"
-                            className="edit-button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditTest(test);
-                            }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="delete-button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteTest(test.id);
-                            }}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+          {activeTab === 'tests' && (
+            <div className="dashboard-card">
+              <div className="card-toolbar">
+                <div className="toolbar-left">
+                  <h2>All Tests</h2>
+                  <span className="test-count">{tests.length} total</span>
+                </div>
+                <button
+                  className="btn-create-test"
+                  onClick={() => navigate('/admin-panel/test/new')}
+                >
+                  <span className="btn-icon">+</span>
+                  Create New Test
+                </button>
               </div>
 
-              <div className="test-form">
-                <h3>{isEditingTest ? `Edit Test: ${selectedTest?.name}` : 'Create New Test'}</h3>
-                <form onSubmit={isEditingTest ? handleUpdateTest : handleCreateTest}>
-                  <div className="form-group">
-                    <label htmlFor="test-title">Test Name</label>
-                    <input
-                      id="test-title"
-                      type="text"
-                      value={newTest.name}
-                      onChange={(e) => setNewTest({ ...newTest, name: e.target.value })}
-                      required
-                    />
-                  </div>
+              {isLoading ? (
+                <div className="loading-container">
+                  <div className="spinner"></div>
+                  <p>Loading tests...</p>
+                </div>
+              ) : tests.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-icon">📋</div>
+                  <h3>No tests found</h3>
+                  <p>Create your first test to get started</p>
+                  <button
+                    className="btn-create-test"
+                    onClick={() => navigate('/admin-panel/test/new')}
+                  >
+                    <span className="btn-icon">+</span>
+                    Create New Test
+                  </button>
+                </div>
+              ) : (
+                <div className="tests-grid">
+                  {tests.map(test => (
+                    <div key={test.id} className="test-card">
+                      <div className="test-card-header">
+                        <h3>{test.name}</h3>
+                        <span className={`status-badge ${test.is_active ? 'active' : 'inactive'}`}>
+                          <span className="status-dot"></span>
+                          {test.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                      
+                      <p className="test-description">
+                        {test.description || 'No description provided'}
+                      </p>
+                      
+                      <div className="test-stats">
+                        <div className="stat-item">
+                          <span className="stat-icon">❓</span>
+                          <div className="stat-content">
+                            <span className="stat-label">Questions</span>
+                            <span className="stat-value">{test.questions_count || 0}</span>
+                          </div>
+                        </div>
+                        <div className="stat-item">
+                          <span className="stat-icon">⏱️</span>
+                          <div className="stat-content">
+                            <span className="stat-label">Duration</span>
+                            <span className="stat-value">{test.duration_minutes} min</span>
+                          </div>
+                        </div>
+                      </div>
 
-                  <div className="form-group">
-                    <label htmlFor="test-description">Description</label>
-                    <textarea
-                      id="test-description"
-                      value={newTest.description}
-                      onChange={(e) => setNewTest({ ...newTest, description: e.target.value })}
-                      rows={3}
-                    />
-                  </div>
+                      <div className="test-card-actions">
+                        <button
+                          className="btn-edit"
+                          onClick={() => navigate(`/admin-panel/test/${test.id}`)}
+                        >
+                          <span className="btn-icon">✏️</span>
+                          Edit
+                        </button>
+                        <button
+                          className="btn-delete"
+                          onClick={() => handleDeleteTest(test.id)}
+                        >
+                          <span className="btn-icon">🗑️</span>
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
-                  <div className="form-group">
-                    <label htmlFor="test-duration">Duration (minutes)</label>
-                    <input
-                      id="test-duration"
-                      type="number"
-                      min="1"
-                      value={newTest.duration_minutes}
-                      onChange={(e) => setNewTest({ ...newTest, duration_minutes: parseInt(e.target.value) || 60 })}
-                      required
-                    />
-                  </div>
-
-                  <div className="form-group checkbox-group">
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={newTest.is_active}
-                        onChange={(e) => setNewTest({ ...newTest, is_active: e.target.checked })}
-                      />
-                      Active
-                    </label>
-                  </div>
-
-                  {isEditingTest && (
-                    <div className="upload-options">
-                      <h4>Upload Data for This Test</h4>
-                      <button
-                        type="button"
-                        className="upload-button"
-                        onClick={() => handleTabChange('upload')}
+          {activeTab === 'scores' && (
+            <div className="dashboard-card">
+              <div className="card-toolbar">
+                <div className="toolbar-left">
+                  <h2>Student Submissions</h2>
+                  {selectedTest && (
+                    <div className="test-filter">
+                      <label>Test:</label>
+                      <select
+                        value={selectedTest.id}
+                        onChange={(e) => {
+                          const testId = parseInt(e.target.value);
+                          const test = tests.find(t => t.id === testId) || null;
+                          setSelectedTest(test);
+                          if (test) {
+                            fetchScores(test.id);
+                          }
+                        }}
                       >
-                        Upload User & Exam Data
-                      </button>
+                        {tests.map(test => (
+                          <option key={test.id} value={test.id}>{test.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+                <div className="toolbar-actions">
+                  <button
+                    className="btn-refresh"
+                    onClick={() => fetchScores(selectedTest?.id)}
+                    disabled={isLoading}
+                  >
+                    <span className="btn-icon">🔄</span>
+                    {isLoading ? 'Loading...' : 'Refresh'}
+                  </button>
+                  <button
+                    className="btn-download"
+                    onClick={handleDownloadScores}
+                    disabled={isDownloading || isLoading || scoreData.length === 0}
+                  >
+                    <span className="btn-icon">📥</span>
+                    {isDownloading ? 'Downloading...' : 'Download Excel'}
+                  </button>
+                </div>
+              </div>
+
+              {isLoading ? (
+                <div className="loading-container">
+                  <div className="spinner"></div>
+                  <p>Loading scores...</p>
+                </div>
+              ) : scoreData.length > 0 ? (
+                <div className="scores-table-container">
+                  <table className="scores-table">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>User ID</th>
+                        <th>Score</th>
+                        <th 
+                          className="sortable-header"
+                          onClick={() => handleSort('percentage')}
+                        >
+                          Percentage
+                          <span className="sort-icon">
+                            {sortField === 'percentage' ? (sortDirection === 'asc' ? ' ▲' : ' ▼') : ' ⇅'}
+                          </span>
+                        </th>
+                        <th 
+                          className="sortable-header"
+                          onClick={() => handleSort('submitted_at')}
+                        >
+                          Submitted At
+                          <span className="sort-icon">
+                            {sortField === 'submitted_at' ? (sortDirection === 'asc' ? ' ▲' : ' ▼') : ' ⇅'}
+                          </span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {getSortedScores().map(submission => (
+                        <tr key={submission.id}>
+                          <td>{submission.id}</td>
+                          <td>{submission.user_id}</td>
+                          <td>
+                            <span className="score-badge">
+                              {submission.score.points} / {submission.score.total}
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`percentage-badge ${
+                              submission.score.percentage >= 75 ? 'excellent' :
+                              submission.score.percentage >= 50 ? 'good' :
+                              submission.score.percentage >= 35 ? 'average' : 'poor'
+                            }`}>
+                              {submission.score.percentage}%
+                            </span>
+                          </td>
+                          <td>{new Date(submission.submitted_at).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <div className="empty-icon">📊</div>
+                  <h3>No submissions found</h3>
+                  <p>Student scores will appear here once they submit the test</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'analysis' && (
+            <div className="analysis-container">
+              <div className="dashboard-card">
+                <div className="card-toolbar">
+                  <div className="toolbar-left">
+                    <h2>📈 Select Test for Analysis</h2>
+                  </div>
+                  {selectedTest && (
+                    <div className="test-filter">
+                      <label>Test:</label>
+                      <select
+                        value={selectedTest.id}
+                        onChange={(e) => {
+                          const testId = parseInt(e.target.value);
+                          const test = tests.find(t => t.id === testId) || null;
+                          setSelectedTest(test);
+                          if (test) {
+                            fetchAnalysisData(test.id);
+                          }
+                        }}
+                      >
+                        {tests.map(test => (
+                          <option key={test.id} value={test.id}>{test.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {isLoading ? (
+                <div className="loading-container">
+                  <div className="spinner"></div>
+                  <p>Loading analysis data...</p>
+                </div>
+              ) : analysisData ? (
+                <>
+                  {/* KEY METRICS - Most Important */}
+                  <div className="analysis-section">
+                    <h3 className="section-title">📊 Key Performance Indicators</h3>
+                    <div className="kpi-grid">
+                      <div className="kpi-card primary">
+                        <div className="kpi-icon">🎯</div>
+                        <div className="kpi-content">
+                          <div className="kpi-value">{analysisData.participation.attempted_percentage}%</div>
+                          <div className="kpi-label">Participation Rate</div>
+                          <div className="kpi-subtitle">{analysisData.participation.total_attempted} of {analysisData.participation.total_assigned} attempted</div>
+                        </div>
+                      </div>
+                      {analysisData.scoreDistribution && (
+                        <>
+                          <div className="kpi-card success">
+                            <div className="kpi-icon">✅</div>
+                            <div className="kpi-content">
+                              <div className="kpi-value">{analysisData.scoreDistribution.passRate}%</div>
+                              <div className="kpi-label">Pass Rate</div>
+                              <div className="kpi-subtitle">{analysisData.scoreDistribution.passCount} students passed</div>
+                            </div>
+                          </div>
+                          <div className="kpi-card info">
+                            <div className="kpi-icon">📈</div>
+                            <div className="kpi-content">
+                              <div className="kpi-value">{analysisData.scoreDistribution.average}%</div>
+                              <div className="kpi-label">Average Score</div>
+                              <div className="kpi-subtitle">Class performance</div>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* PARTICIPATION PIE CHART */}
+                  <div className="analysis-section">
+                    <h3 className="section-title">👥 Participation Breakdown</h3>
+                    <div className="chart-grid">
+                      <div className="dashboard-card">
+                        <div className="card-header-simple">
+                          <h4>Student Participation</h4>
+                          <p className="card-subtitle">Visual breakdown of test attempts</p>
+                        </div>
+                        <div className="pie-chart-container">
+                          <div 
+                            className="pie-chart"
+                            style={{
+                              '--percentage': analysisData.participation.attempted_percentage
+                            } as React.CSSProperties}
+                          ></div>
+                          <div className="pie-legend">
+                            <div className="legend-item">
+                              <span className="legend-color attempted"></span>
+                              <span className="legend-label">Attempted</span>
+                              <span className="legend-value">{analysisData.participation.total_attempted} ({analysisData.participation.attempted_percentage}%)</span>
+                            </div>
+                            <div className="legend-item">
+                              <span className="legend-color not-attempted"></span>
+                              <span className="legend-label">Not Attempted</span>
+                              <span className="legend-value">{analysisData.participation.total_not_attempted} ({(100 - analysisData.participation.attempted_percentage).toFixed(1)}%)</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="dashboard-card">
+                        <div className="card-header-simple">
+                          <h4>Participation Details</h4>
+                          <p className="card-subtitle">Complete participation statistics</p>
+                        </div>
+                        <div className="stats-list">
+                          <div className="stat-row">
+                            <span className="stat-icon">👥</span>
+                            <span className="stat-label">Total Assigned</span>
+                            <span className="stat-value">{analysisData.participation.total_assigned}</span>
+                          </div>
+                          <div className="stat-row success">
+                            <span className="stat-icon">✅</span>
+                            <span className="stat-label">Attempted</span>
+                            <span className="stat-value">{analysisData.participation.total_attempted}</span>
+                          </div>
+                          <div className="stat-row danger">
+                            <span className="stat-icon">⏳</span>
+                            <span className="stat-label">Not Attempted</span>
+                            <span className="stat-value">{analysisData.participation.total_not_attempted}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {analysisData.participation.not_attempted_users && analysisData.participation.not_attempted_users.length > 0 && (
+                      <div className="dashboard-card" style={{ marginTop: '1.5rem' }}>
+                        <div className="card-header-simple danger">
+                          <h4>⏳ Students Who Haven't Attempted</h4>
+                          <p className="card-subtitle">Total: {analysisData.participation.not_attempted_users.length} students</p>
+                        </div>
+                        <div className="user-grid">
+                          {getPaginatedNotAttemptedUsers().map((user: any, index: number) => (
+                            <div key={index} className="user-card">
+                              <span className="user-id-badge">ID: {user.user_id}</span>
+                              <span className="user-name-text">Name: {user.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {getTotalNotAttemptedPages() > 1 && (
+                          <div className="pagination-controls">
+                            <button 
+                              className="pagination-btn"
+                              onClick={handlePrevNotAttemptedPage}
+                              disabled={notAttemptedPage === 1}
+                            >
+                              ← Previous
+                            </button>
+                            <span className="pagination-info">
+                              Page {notAttemptedPage} of {getTotalNotAttemptedPages()}
+                            </span>
+                            <button 
+                              className="pagination-btn"
+                              onClick={handleNextNotAttemptedPage}
+                              disabled={notAttemptedPage === getTotalNotAttemptedPages()}
+                            >
+                              Next →
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* SCORE DISTRIBUTION BAR CHART */}
+                  {analysisData.scoreDistribution && (
+                    <div className="analysis-section">
+                      <h3 className="section-title">📊 Score Distribution</h3>
+                      <div className="dashboard-card">
+                        <div className="card-header-simple">
+                          <h4>Score Range Breakdown</h4>
+                          <p className="card-subtitle">Based on {analysisData.scoreDistribution.totalSubmissions} submission{analysisData.scoreDistribution.totalSubmissions !== 1 ? 's' : ''}</p>
+                        </div>
+                        <div className="horizontal-bar-chart">
+                          {Object.entries(analysisData.scoreDistribution.buckets)
+                            .reverse() // Reverse the order to show highest percentage first
+                            .map(([range, count]: [string, any]) => {
+                            const percentage = (count / analysisData.scoreDistribution.totalSubmissions) * 100;
+                            const colorClass = range === '0-25' ? 'poor' : range === '26-50' ? 'average' : range === '51-75' ? 'good' : 'excellent';
+                            // Ensure minimum width for visibility, especially for 0%
+                            const displayWidth = count === 0 ? 0 : Math.max(percentage, 3);
+                            return (
+                              <div key={range} className="bar-item">
+                                <div className="bar-header">
+                                  <span className={`bar-label ${colorClass}`}>{range}%</span>
+                                  <span className="bar-count">{count} students ({percentage.toFixed(0)}%)</span>
+                                </div>
+                                <div className="bar-track">
+                                  {count > 0 ? (
+                                    <div 
+                                      className={`bar-fill ${colorClass}`}
+                                      style={{ width: `${displayWidth}%` }}
+                                    >
+                                      <span className="bar-percentage">{percentage.toFixed(0)}%</span>
+                                    </div>
+                                  ) : (
+                                    <div className="bar-empty">
+                                      <span className="bar-empty-text">No students</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="metrics-grid" style={{ marginTop: '1.5rem' }}>
+                        <div className="metric-card highlight">
+                          <div className="metric-icon">📈</div>
+                          <div className="metric-content">
+                            <div className="metric-value">{analysisData.scoreDistribution.average}%</div>
+                            <div className="metric-label">Average Score</div>
+                          </div>
+                        </div>
+                        <div className="metric-card success">
+                          <div className="metric-icon">🏆</div>
+                          <div className="metric-content">
+                            <div className="metric-value">{analysisData.scoreDistribution.highest}%</div>
+                            <div className="metric-label">Highest Score</div>
+                          </div>
+                        </div>
+                        <div className="metric-card danger">
+                          <div className="metric-icon">📉</div>
+                          <div className="metric-content">
+                            <div className="metric-value">{analysisData.scoreDistribution.lowest}%</div>
+                            <div className="metric-label">Lowest Score</div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   )}
 
-                  <div className="form-actions">
-                    {isEditingTest && (
-                      <button
-                        type="button"
-                        className="cancel-button"
-                        onClick={cancelEditTest}
-                      >
-                        Cancel
-                      </button>
-                    )}
-                    <button
-                      type="submit"
-                      className="submit-button"
-                      disabled={isLoading}
-                    >
-                      {isLoading ? 'Saving...' : isEditingTest ? 'Update Test' : 'Create Test'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </div>
-        )}
+                  {/* PERFORMANCE SEGMENTATION */}
+                  {analysisData.performance && (
+                    <div className="analysis-section">
+                      <h3 className="section-title">🏆 Performance Segmentation</h3>
+                      <div className="performance-grid">
+                        <div className="dashboard-card">
+                          <div className="card-header-simple success">
+                            <h4>🌟 Top Performers (Top 10%)</h4>
+                          </div>
+                          <div className="performance-list">
+                            {analysisData.performance.topPerformers.length > 0 ? (
+                              analysisData.performance.topPerformers.map((user: any) => (
+                                <div key={user.id} className="performance-item">
+                                  <span className="user-id">User: {user.user_id}</span>
+                                  <span className="percentage-badge excellent">
+                                    {user.score.percentage}%
+                                  </span>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="no-data">No data available</p>
+                            )}
+                          </div>
+                        </div>
 
-        {activeTab === 'upload' && (
-          <div className="admin-card">
-            <h2>Upload Exam Data {selectedTest ? `for "${selectedTest.name}"` : ''}</h2>
-
-            {message && <div className="success-message">{message}</div>}
-            {error && <div className="error-message">{error}</div>}
-
-            <form onSubmit={handleSubmit}>
-              {!selectedTest ? (
-                <div className="test-selector">
-                  <h3>Select Test</h3>
-                  {tests.length === 0 ? (
-                    <p>No tests available. Please create a test first.</p>
-                  ) : (
-                    <select
-                      value=""
-                      onChange={(e) => {
-                        const testId = parseInt(e.target.value);
-                        const test = tests.find(t => t.id === testId) || null;
-                        setSelectedTest(test);
-                      }}
-                    >
-                      <option value="" disabled>Select a test</option>
-                      {tests.map(test => (
-                        <option key={test.id} value={test.id}>{test.name}</option>
-                      ))}
-                    </select>
+                        <div className="dashboard-card">
+                          <div className="card-header-simple danger">
+                            <h4>📚 Struggling Students (Bottom 20%)</h4>
+                          </div>
+                          <div className="performance-list">
+                            {analysisData.performance.strugglingUsers.length > 0 ? (
+                              analysisData.performance.strugglingUsers.map((user: any) => (
+                                <div key={user.id} className="performance-item">
+                                  <span className="user-id">User: {user.user_id}</span>
+                                  <span className={`percentage-badge ${
+                                    user.score.percentage >= 50 ? 'average' : 'poor'
+                                  }`}>
+                                    {user.score.percentage}%
+                                  </span>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="no-data">No data available</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   )}
-                </div>
+
+                  {/* TIME DISTRIBUTION */}
+                  {analysisData.timeDistribution && (
+                    <div className="analysis-section">
+                      <h3 className="section-title">🕐 Submission Timeline</h3>
+                      <div className="dashboard-card">
+                        <div className="card-header-simple">
+                          <h4>When Students Submit</h4>
+                          <p className="card-subtitle">Distribution across different times of day</p>
+                        </div>
+                        <div className="time-distribution">
+                          {[
+                            { key: 'morning', label: 'Morning', range: '6:00 AM - 12:00 PM', icon: '🌅' },
+                            { key: 'afternoon', label: 'Afternoon', range: '12:00 PM - 6:00 PM', icon: '☀️' },
+                            { key: 'evening', label: 'Evening', range: '6:00 PM - 12:00 AM', icon: '🌆' },
+                            { key: 'night', label: 'Night', range: '12:00 AM - 6:00 AM', icon: '🌙' }
+                          ].map(({ key, label, range, icon }) => {
+                            const count = analysisData.timeDistribution[key];
+                            const percentage = analysisData.totalSubmissions > 0 ? (count / analysisData.totalSubmissions) * 100 : 0;
+                            return (
+                              <div key={key} className="time-item">
+                                <div className="time-header">
+                                  <div className="time-icon">{icon}</div>
+                                  <div className="time-info">
+                                    <div className="time-label">{label}</div>
+                                    <div className="time-range">{range}</div>
+                                  </div>
+                                  <div className="time-count">
+                                    <strong>{count}</strong>
+                                    <span className="time-percentage">({percentage.toFixed(0)}%)</span>
+                                  </div>
+                                </div>
+                                <div className="time-bar">
+                                  <div 
+                                    className={`time-fill ${key}`}
+                                    style={{ width: `${percentage}%` }}
+                                  ></div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
-                <div className="selected-test-info">
-                  <p>You are uploading data for <strong>{selectedTest.name}</strong></p>
-                  <button
-                    type="button"
-                    className="change-test-button"
-                    onClick={() => setSelectedTest(null)}
-                  >
-                    Change Test
-                  </button>
+                <div className="empty-state">
+                  <div className="empty-icon">📈</div>
+                  <h3>No analysis data available</h3>
+                  <p>Analysis will appear once students submit the test</p>
                 </div>
               )}
-
-              <div className="file-upload-section">
-                <h3>User Data (Optional)</h3>
-                <p>Upload Excel file with user information</p>
-
-                <div className="file-input-container">
-                  <input
-                    type="file"
-                    id="user-file"
-                    accept=".xlsx,.xls"
-                    onChange={handleUserFileChange}
-                    disabled={isLoading}
-                  />
-                  <label
-                    htmlFor="user-file"
-                    className={userFile ? 'has-file' : ''}
-                  >
-                    {userFile ? userFile.name : 'Select User Data File (.xlsx)'}
-                  </label>
-                </div>
-              </div>
-
-              <div className="file-upload-section">
-                <h3>Exam Data (Optional)</h3>
-                <p>Upload Excel file with question sheets (each sheet = one section)</p>
-
-                <div className="file-input-container">
-                  <input
-                    type="file"
-                    id="exam-file"
-                    accept=".xlsx,.xls"
-                    onChange={handleExamFileChange}
-                    disabled={isLoading}
-                  />
-                  <label
-                    htmlFor="exam-file"
-                    className={examFile ? 'has-file' : ''}
-                  >
-                    {examFile ? examFile.name : 'Select Exam Data File (.xlsx)'}
-                  </label>
-                </div>
-              </div>
-
-              <div className="format-guidelines">
-                <h3>File Format Guidelines</h3>
-                <div className="guideline-section">
-                  <h4>User Data Excel Format:</h4>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>user_id</th>
-                        <th>dob</th>
-                        <th>name (optional)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>test123</td>
-                        <td>2000-01-01</td>
-                        <td>Test User</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="guideline-section">
-                  <h4>Exam Data Excel Format (per sheet):</h4>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>question</th>
-                        <th>option_a</th>
-                        <th>option_b</th>
-                        <th>option_c</th>
-                        <th>option_d</th>
-                        <th>correct_answer</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>What is...?</td>
-                        <td>Option A</td>
-                        <td>Option B</td>
-                        <td>Option C</td>
-                        <td>Option D</td>
-                        <td>A</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="upload-button"
-                disabled={isLoading || !selectedTest || (!userFile && !examFile)}
-              >
-                {isLoading ? 'Uploading...' : 'Upload Files'}
-              </button>
-            </form>
-          </div>
-        )}
-
-        {activeTab === 'scores' && (
-          <div className="admin-card">
-            <h2>Student Scores {selectedTest ? `for "${selectedTest.name}"` : ''}</h2>
-
-            {error && <div className="error-message">{error}</div>}
-
-            <div className="scores-actions">
-              <button
-                className="download-button"
-                onClick={handleDownloadScores}
-                disabled={isDownloading || isLoading || scoreData.length === 0}
-              >
-                {isDownloading ? 'Downloading...' : 'Download Scores (Excel)'}
-              </button>
-              <button
-                className="refresh-button"
-                onClick={() => fetchScores(selectedTest?.id)}
-                disabled={isLoading}
-              >
-                {isLoading ? 'Loading...' : 'Refresh Scores'}
-              </button>
             </div>
-
-            {isLoading ? (
-              <div className="loading-message">Loading scores...</div>
-            ) : scoreData.length > 0 ? (
-              <div className="scores-table-container">
-                <table className="scores-table">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>User ID</th>
-                      <th>Score</th>
-                      <th>Percentage</th>
-                      <th>Submitted At</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scoreData.map(submission => (
-                      <tr key={submission.id}>
-                        <td>{submission.id}</td>
-                        <td>{submission.user_id}</td>
-                        <td>{submission.score.points} / {submission.score.total}</td>
-                        <td>{submission.score.percentage}%</td>
-                        <td>{new Date(submission.submitted_at).toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="no-data-message">No submissions found.</div>
-            )}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 };

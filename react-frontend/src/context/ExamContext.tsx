@@ -69,37 +69,7 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   
   // Time management
   // Exam duration (ms) - change if you want different duration
-  const examDuration = 3 * 60 * 60 * 1000; // 3 hours in milliseconds
-
-  // Initialize examStartTime. If there's a saved start time in localStorage and it
-  // is still within the exam duration window, reuse it. Otherwise start a new timer.
-  const [examStartTime, setExamStartTime] = useState<number>(() => {
-    const saved = localStorage.getItem('examStartTime');
-    const now = Date.now();
-    if (saved) {
-      const parsed = parseInt(saved, 10);
-      if (!isNaN(parsed) && (now - parsed) < examDuration) {
-        return parsed;
-      }
-    }
-    // No valid saved start time or it expired -> use now
-    try {
-      localStorage.setItem('examStartTime', now.toString());
-    } catch (e) {
-      // ignore localStorage failures
-    }
-    return now;
-  });
-
-  // Keep localStorage in sync when examStartTime changes
-  React.useEffect(() => {
-    try {
-      localStorage.setItem('examStartTime', examStartTime.toString());
-    } catch (e) {
-      // ignore localStorage failures
-    }
-  }, [examStartTime]);
-  
+ 
   // Load exam data if user is already authenticated
   React.useEffect(() => {
     const loadExamData = async () => {
@@ -123,6 +93,46 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     
     loadExamData();
   }, [user, examData]);
+
+
+  // Get exam duration from examData or default to 3 hours
+  const getExamDuration = (): number => {
+    if (examData && examData.duration_minutes) {
+      return examData.duration_minutes * 60 * 1000; // Convert minutes to milliseconds
+    }
+    return 3 * 60 * 60 * 1000; // Default: 3 hours in milliseconds
+  };
+
+  // Initialize examStartTime. If there's a saved start time in localStorage and it
+  // is still within the exam duration window, reuse it. Otherwise start a new timer.
+  const [examStartTime, setExamStartTime] = useState<number>(() => {
+    const saved = localStorage.getItem('examStartTime');
+    const now = Date.now();
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      const duration = getExamDuration();
+      if (!isNaN(parsed) && (now - parsed) < duration) {
+        return parsed;
+      }
+    }
+    // No valid saved start time or it expired -> use now
+    try {
+      localStorage.setItem('examStartTime', now.toString());
+    } catch (e) {
+      // ignore localStorage failures
+    }
+    return now;
+  });
+
+  // Keep localStorage in sync when examStartTime changes
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('examStartTime', examStartTime.toString());
+    } catch (e) {
+      // ignore localStorage failures
+    }
+  }, [examStartTime]);
+  
   
   // Initialize question states when exam data is loaded
   React.useEffect(() => {
@@ -162,7 +172,8 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // If the saved exam start time (in localStorage) is missing or expired for
       // this new exam data, reset it so the timer starts fresh and doesn't show 00:00:00.
       const now = Date.now();
-      if ((now - examStartTime) >= examDuration) {
+      const duration = getExamDuration();
+      if ((now - examStartTime) >= duration) {
         setExamStartTime(now);
         try {
           localStorage.setItem('examStartTime', now.toString());
@@ -228,7 +239,7 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Navigation methods
   const goToNextQuestion = () => {
     const currentSection = getCurrentSection();
-    if (!currentSection) return;
+    if (!currentSection || !examData) return;
     
     // Mark current question as not-answered if it's not answered yet
     const currentQuestion = getCurrentQuestion();
@@ -245,13 +256,24 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (currentIndex < sectionQuestions.length - 1) {
       // Go to next question in same section
       setCurrentQuestionId(sectionQuestions[currentIndex + 1].question_id);
-    } else if (currentSectionId < (examData?.sections.length || 0)) {
-      // Go to first question of next section
-      const nextSectionId = currentSectionId + 1;
-      setCurrentSectionId(nextSectionId);
-      const nextSection = examData?.sections.find(s => s.id === nextSectionId);
-      if (nextSection && nextSection.questions.length > 0) {
-        setCurrentQuestionId(nextSection.questions[0].question_id);
+    } else {
+      // We're at the last question of the current section
+      const currentSectionIndex = examData.sections.findIndex(s => s.id === currentSectionId);
+      
+      if (currentSectionIndex < examData.sections.length - 1) {
+        // Go to first question of next section
+        const nextSection = examData.sections[currentSectionIndex + 1];
+        setCurrentSectionId(nextSection.id);
+        if (nextSection.questions.length > 0) {
+          setCurrentQuestionId(nextSection.questions[0].question_id);
+        }
+      } else {
+        // We're at the last question of the last section, wrap to first question
+        const firstSection = examData.sections[0];
+        if (firstSection && firstSection.questions.length > 0) {
+          setCurrentSectionId(firstSection.id);
+          setCurrentQuestionId(firstSection.questions[0].question_id);
+        }
       }
     }
   };
@@ -320,7 +342,8 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Get remaining time
   const getRemainingTime = (): number => {
     const elapsed = Date.now() - examStartTime;
-    return Math.max(0, examDuration - elapsed);
+    const duration = getExamDuration();
+    return Math.max(0, duration - elapsed);
   };
 
   const resetExamStartTime = () => {

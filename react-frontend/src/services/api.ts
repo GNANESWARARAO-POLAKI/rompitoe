@@ -304,6 +304,39 @@ export const apiService = {
     }
   },
 
+  // Get current user's submissions
+  getMySubmissions: async (): Promise<ScoresResponse> => {
+    try {
+      const response = await api.get<ScoresResponse>('/my-submissions');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch my submissions:', error);
+      throw error;
+    }
+  },
+
+  // Get detailed submission analysis by ID
+  getSubmissionDetails: async (submissionId: number): Promise<any> => {
+    try {
+      const response = await api.get(`/submission/${submissionId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch submission details:', error);
+      throw error;
+    }
+  },
+
+  // Get test analysis with participation metrics
+  getTestAnalysis: async (testId: number): Promise<any> => {
+    try {
+      const response = await api.get(`/test-analysis/${testId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch test analysis:', error);
+      throw error;
+    }
+  },
+
   // Download scores as CSV (for admin)
   downloadScores: async () => {
     try {

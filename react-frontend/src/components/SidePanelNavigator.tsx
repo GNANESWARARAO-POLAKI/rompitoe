@@ -54,6 +54,10 @@ const SidePanelNavigator: React.FC = () => {
           <div className="status-dot marked-for-review"></div>
           <span>Marked for Review</span>
         </div>
+        <div className="legend-item">
+          <div className="status-dot answered-marked"></div>
+          <span>Answered & Marked</span>
+        </div>
       </div>
       
       <div className="sections-container">
@@ -92,20 +96,32 @@ const SidePanelNavigator: React.FC = () => {
         </div>
         <div className="summary-item">
           <span className="label">Answered:</span>
-          <span className="value">
+          <span className="value answered-count">
             {questionStates.filter(state => state.status === 'answered').length}
           </span>
         </div>
         <div className="summary-item">
           <span className="label">Not Answered:</span>
-          <span className="value">
+          <span className="value not-answered-count">
             {questionStates.filter(state => state.status === 'not-answered').length}
           </span>
         </div>
         <div className="summary-item">
           <span className="label">Marked for Review:</span>
-          <span className="value">
+          <span className="value marked-count">
             {questionStates.filter(state => state.status === 'marked-for-review').length}
+          </span>
+        </div>
+        <div className="summary-item">
+          <span className="label">Answered & Marked:</span>
+          <span className="value answered-marked-count">
+            {questionStates.filter(state => state.status === 'answered-marked').length}
+          </span>
+        </div>
+        <div className="summary-item">
+          <span className="label">Not Visited:</span>
+          <span className="value not-visited-count">
+            {questionStates.filter(state => state.status === 'not-visited').length}
           </span>
         </div>
       </div>

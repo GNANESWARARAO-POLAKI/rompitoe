@@ -71,7 +71,12 @@ const Result: React.FC = () => {
           )}
           <div className="detail-row">
             <span>Result:</span>
-            <span>{score >= 70 ? 'Pass' : 'Fail'}</span>
+            <span style={{ 
+              color: score >= 35 ? '#4caf50' : '#f44336',
+              fontWeight: 'bold'
+            }}>
+              {score >= 35 ? 'Pass' : 'Fail'}
+            </span>
           </div>
         </div>
 

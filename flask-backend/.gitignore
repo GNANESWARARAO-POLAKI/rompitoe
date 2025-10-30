@@ -1,8 +1,55 @@
+# Virtual Environments
 venv/
-.vercel
+env/
+ENV/
 myvenv/
 newenv/
 myvnv/
 newvnv/
-venv/
-env/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+*.pyo
+*.pyd
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+instance/
+exam_app.db
+rompit_oe.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Deployment
+.vercel/
+.vercel
+
+# Uploads
+uploads/
+*.csv
+
+# Build
+build/
+dist/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak

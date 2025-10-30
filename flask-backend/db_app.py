@@ -89,6 +89,7 @@ class Test(db.Model):
     duration_minutes = db.Column(db.Integer, default=60)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_active = db.Column(db.Boolean, default=True)
+    allowed_user_ids = db.Column(db.Text)  # JSON string of allowed user IDs
     sections = db.relationship('Section', backref='test', lazy=True)
     submissions = db.relationship('Submission', backref='test', lazy=True)
     
@@ -214,17 +215,38 @@ def get_tests():
     }), 200
 
 @app.route('/active-tests', methods=['GET'])
+@jwt_required()
 def get_active_tests():
-    """Get all active tests for student login (no authentication required)"""
+    """Get active tests that the current user is enrolled in"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    # Get all active tests
     tests = Test.query.filter_by(is_active=True).all()
     tests_data = []
     
     for test in tests:
-        test_data = test.to_dict()
-        # Add basic info for display
-        test_data['title'] = test.name
-        test_data['description'] = test.description
-        tests_data.append(test_data)
+        # Check if user is enrolled in this test
+        allowed_users = []
+        if test.allowed_user_ids:
+            try:
+                allowed_users = json.loads(test.allowed_user_ids)
+            except:
+                allowed_users = []
+        
+        # Include test if:
+        # 1. User is admin (can see all tests), OR
+        # 2. No enrollment restriction (allowed_user_ids is empty/null), OR
+        # 3. User is in the allowed list
+        if user.is_admin or not allowed_users or user.user_id in allowed_users:
+            test_data = test.to_dict()
+            # Add basic info for display
+            test_data['title'] = test.name
+            test_data['description'] = test.description
+            tests_data.append(test_data)
     
     return jsonify({'tests': tests_data}), 200
 
@@ -310,11 +332,136 @@ def update_test(test_id):
     if 'is_active' in data:
         test.is_active = data.get('is_active')
     
+    if 'allowed_user_ids' in data:
+        # Update enrollment list
+        allowed_users = data.get('allowed_user_ids')
+        if isinstance(allowed_users, list):
+            test.allowed_user_ids = json.dumps(allowed_users)
+        else:
+            test.allowed_user_ids = allowed_users
+    
     db.session.commit()
     
     return jsonify({
         'message': 'Test updated successfully',
         'test': test.to_dict()
+    }), 200
+
+@app.route('/tests/<int:test_id>/enrollments', methods=['GET'])
+@jwt_required()
+def get_test_enrollments(test_id):
+    """Get enrolled users for a test (admin only)"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user or not user.is_admin:
+        return jsonify({'error': 'Admin privileges required'}), 403
+    
+    test = Test.query.get(test_id)
+    
+    if not test:
+        return jsonify({'error': 'Test not found'}), 404
+    
+    allowed_users = []
+    if test.allowed_user_ids:
+        try:
+            allowed_users = json.loads(test.allowed_user_ids)
+        except:
+            allowed_users = []
+    
+    return jsonify({
+        'test_id': test_id,
+        'test_name': test.name,
+        'enrolled_users': allowed_users,
+        'enrollment_count': len(allowed_users)
+    }), 200
+
+@app.route('/tests/<int:test_id>/enrollments', methods=['POST'])
+@jwt_required()
+def enroll_users_in_test(test_id):
+    """Enroll users in a test (admin only)"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user or not user.is_admin:
+        return jsonify({'error': 'Admin privileges required'}), 403
+    
+    test = Test.query.get(test_id)
+    
+    if not test:
+        return jsonify({'error': 'Test not found'}), 404
+    
+    data = request.json
+    user_ids = data.get('user_ids', [])
+    
+    if not isinstance(user_ids, list):
+        return jsonify({'error': 'user_ids must be an array'}), 400
+    
+    # Get current enrollments
+    allowed_users = []
+    if test.allowed_user_ids:
+        try:
+            allowed_users = json.loads(test.allowed_user_ids)
+        except:
+            allowed_users = []
+    
+    # Add new users (avoid duplicates)
+    for user_id in user_ids:
+        if user_id not in allowed_users:
+            allowed_users.append(user_id)
+    
+    # Save updated list
+    test.allowed_user_ids = json.dumps(allowed_users)
+    db.session.commit()
+    
+    return jsonify({
+        'message': f'Successfully enrolled {len(user_ids)} user(s)',
+        'enrolled_users': allowed_users,
+        'enrollment_count': len(allowed_users)
+    }), 200
+
+@app.route('/tests/<int:test_id>/enrollments', methods=['DELETE'])
+@jwt_required()
+def unenroll_users_from_test(test_id):
+    """Remove users from a test (admin only)"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user or not user.is_admin:
+        return jsonify({'error': 'Admin privileges required'}), 403
+    
+    test = Test.query.get(test_id)
+    
+    if not test:
+        return jsonify({'error': 'Test not found'}), 404
+    
+    data = request.json
+    user_ids = data.get('user_ids', [])
+    
+    if not isinstance(user_ids, list):
+        return jsonify({'error': 'user_ids must be an array'}), 400
+    
+    # Get current enrollments
+    allowed_users = []
+    if test.allowed_user_ids:
+        try:
+            allowed_users = json.loads(test.allowed_user_ids)
+        except:
+            allowed_users = []
+    
+    # Remove specified users
+    for user_id in user_ids:
+        if user_id in allowed_users:
+            allowed_users.remove(user_id)
+    
+    # Save updated list
+    test.allowed_user_ids = json.dumps(allowed_users)
+    db.session.commit()
+    
+    return jsonify({
+        'message': f'Successfully removed {len(user_ids)} user(s)',
+        'enrolled_users': allowed_users,
+        'enrollment_count': len(allowed_users)
     }), 200
 
 @app.route('/tests/<int:test_id>', methods=['DELETE'])
@@ -397,11 +544,15 @@ def upload_files():
         # Process user file
         users_df = pd.read_excel(user_path)
         users_count = 0
+        allowed_user_ids = []
         
         for _, row in users_df.iterrows():
             user_id = str(row.get('user_id'))
             dob = str(row.get('dob'))
             name = row.get('name', '')
+            
+            # Add to allowed users list for this test
+            allowed_user_ids.append(user_id)
             
             # Check if user already exists
             existing_user = User.query.filter_by(user_id=user_id).first()
@@ -412,6 +563,9 @@ def upload_files():
                 new_user = User(user_id=user_id, dob=dob, name=name)
                 db.session.add(new_user)
                 users_count += 1
+        
+        # Store allowed user IDs for this test
+        test.allowed_user_ids = json.dumps(allowed_user_ids)
         
         # Process exam file
         exam_df = pd.read_excel(exam_path, sheet_name=None)  # Get all sheets
@@ -599,6 +753,19 @@ def get_questions():
     if not user.is_admin and not test.is_active:
         return jsonify({'error': 'Test not available'}), 403
     
+    # Check if user is enrolled in this test
+    if not user.is_admin:
+        allowed_users = []
+        if test.allowed_user_ids:
+            try:
+                allowed_users = json.loads(test.allowed_user_ids)
+            except:
+                allowed_users = []
+        
+        # If enrollment is required and user is not in the list, deny access
+        if allowed_users and user.user_id not in allowed_users:
+            return jsonify({'error': 'You are not enrolled in this test'}), 403
+    
     # Get sections for this test ordered by order
     sections = Section.query.filter_by(test_id=test.id).order_by(Section.order).all()
     
@@ -618,12 +785,13 @@ def get_questions():
     return jsonify({
         'test': test.to_dict(),
         'sections': result
+        
     }), 200
 
 @app.route('/submit', methods=['POST'])
 @jwt_required()
 def submit_exam():
-    """Submit user answers for a specific test"""
+    """Submit user answers for a specific test with detailed analysis"""
     current_user_id = get_jwt_identity()
     user = User.query.filter_by(user_id=current_user_id).first()
     
@@ -641,49 +809,255 @@ def submit_exam():
     if not test:
         return jsonify({'error': 'Test not found'}), 404
     
+    # Check if user is enrolled in this test
+    if not user.is_admin:
+        allowed_users = []
+        if test.allowed_user_ids:
+            try:
+                allowed_users = json.loads(test.allowed_user_ids)
+            except:
+                allowed_users = []
+        
+        # If enrollment is required and user is not in the list, deny submission
+        if allowed_users and user.user_id not in allowed_users:
+            return jsonify({'error': 'You are not enrolled in this test'}), 403
+    
     answers = data['answers']
+    question_states = data.get('question_states', {})  # Get question states with time tracking
     
-    # Get all questions for this test
-    test_sections = Section.query.filter_by(test_id=test_id).all()
-    section_ids = [section.id for section in test_sections]
+    # Get all sections and questions for this test
+    test_sections = Section.query.filter_by(test_id=test_id).order_by(Section.order).all()
     
-    # Calculate score
-    questions = Question.query.filter(Question.section_id.in_(section_ids)).all()
-    score = 0
-    total = len(questions)
+    # Calculate overall score and detailed analysis
+    total_questions = 0
+    correct_answers = 0
+    attempted = 0
+    not_attempted = 0
+    marked_for_review = 0
     
-    if total == 0:
-        return jsonify({'error': 'No questions found for this test'}), 404
-    for question in questions:
-        question_id = str(question.id)
-        if question_id in answers and answers[question_id] == question.correct_answer:
-            score += 1
+    section_analysis = []
+    question_details = []
     
-    percentage = round((score / total * 100), 2) if total > 0 else 0
+    for section in test_sections:
+        questions = Question.query.filter_by(section_id=section.id).order_by(Question.section_order).all()
+        
+        section_correct = 0
+        section_total = len(questions)
+        section_attempted = 0
+        
+        for question in questions:
+            total_questions += 1
+            question_id_str = str(question.id)
+            user_answer = answers.get(question_id_str, None)
+            is_correct = user_answer == question.correct_answer
+            
+            if user_answer:
+                attempted += 1
+                section_attempted += 1
+                if is_correct:
+                    correct_answers += 1
+                    section_correct += 1
+            else:
+                not_attempted += 1
+            
+            # Check if marked for review from question_states
+            is_marked = question_states.get(question_id_str, {}).get('marked_for_review', False)
+            if is_marked:
+                marked_for_review += 1
+            
+            # Add question detail
+            question_details.append({
+                'question_number': question.section_order,
+                'section_name': section.name,
+                'question_text': question.question_text,
+                'correct_answer': question.correct_answer,
+                'your_answer': user_answer,
+                'is_correct': is_correct,
+                'is_attempted': user_answer is not None,
+                'is_marked_for_review': is_marked,
+                'status': 'correct' if is_correct else ('incorrect' if user_answer else 'not_attempted')
+            })
+        
+        # Add section analysis
+        section_percentage = round((section_correct / section_total * 100), 2) if section_total > 0 else 0
+        section_analysis.append({
+            'section_name': section.name,
+            'total_questions': section_total,
+            'attempted': section_attempted,
+            'correct': section_correct,
+            'incorrect': section_attempted - section_correct,
+            'score_percentage': section_percentage,
+            'performance': 'Strong' if section_percentage >= 70 else ('Average' if section_percentage >= 50 else 'Needs Improvement')
+        })
+    
+    percentage = round((correct_answers / total_questions * 100), 2) if total_questions > 0 else 0
+    accuracy = round((correct_answers / attempted * 100), 2) if attempted > 0 else 0
     
     # Store submission
     submission = Submission(
         user_id=user.id,
         test_id=test_id,
         answers=json.dumps(answers),
-        score_points=score,
-        score_total=total,
+        score_points=correct_answers,
+        score_total=total_questions,
         score_percentage=percentage
     )
     
     db.session.add(submission)
     db.session.commit()
     
+    # Return comprehensive analysis
     return jsonify({
         'message': 'Exam submitted successfully',
         'submission_id': submission.id,
         'test_id': test_id,
         'test_name': test.name,
-        'score': {
-            'points': score,
-            'total': total,
-            'percentage': percentage
-        }
+        'test_duration_minutes': test.duration_minutes,
+        'overall_summary': {
+            'score_points': correct_answers,
+            'score_total': total_questions,
+            'score_percentage': percentage,
+            'pass_status': 'Pass' if percentage >= 40 else 'Fail',  # 40% pass cutoff
+            'accuracy': accuracy,
+            'total_questions': total_questions,
+            'attempted': attempted,
+            'not_attempted': not_attempted,
+            'correct': correct_answers,
+            'incorrect': attempted - correct_answers,
+            'marked_for_review': marked_for_review
+        },
+        'section_analysis': section_analysis,
+        'question_details': question_details
+    }), 200
+
+@app.route('/my-submissions', methods=['GET'])
+@jwt_required()
+def get_my_submissions():
+    """Get current user's submissions"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    # Get all submissions for current user
+    submissions = Submission.query.filter_by(user_id=user.id).all()
+    
+    return jsonify({
+        'submissions': [sub.to_dict() for sub in submissions]
+    }), 200
+
+@app.route('/submission/<int:submission_id>', methods=['GET'])
+@jwt_required()
+def get_submission_details(submission_id):
+    """Get detailed submission analysis for a specific submission"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    # Get the submission
+    submission = Submission.query.get(submission_id)
+    
+    if not submission:
+        return jsonify({'error': 'Submission not found'}), 404
+    
+    # Verify ownership (users can only see their own submissions, admins can see all)
+    if submission.user_id != user.id and not user.is_admin:
+        return jsonify({'error': 'Unauthorized access'}), 403
+    
+    # Get the test
+    test = Test.query.get(submission.test_id)
+    if not test:
+        return jsonify({'error': 'Test not found'}), 404
+    
+    # Parse answers from JSON
+    answers = json.loads(submission.answers)
+    
+    # Prepare detailed analysis (similar to /submit endpoint)
+    section_analysis = []
+    question_details = []
+    
+    correct_answers = 0
+    attempted = 0
+    marked_for_review = 0
+    total_questions = 0
+    
+    # Process each section
+    for section in test.sections:
+        section_correct = 0
+        section_attempted = 0
+        section_total = len(section.questions)
+        total_questions += section_total
+        
+        for question in section.questions:
+            q_id = str(question.id)
+            user_answer = answers.get(q_id, '')
+            
+            # Determine status
+            is_correct = user_answer == question.correct_answer
+            is_attempted = bool(user_answer)
+            
+            if is_attempted:
+                attempted += 1
+                section_attempted += 1
+                if is_correct:
+                    correct_answers += 1
+                    section_correct += 1
+            
+            # Add question detail with full question text and options
+            question_details.append({
+                'question_number': question.section_order,
+                'section_name': section.name,
+                'question_text': question.question_text,
+                'options': {
+                    'A': question.option_a,
+                    'B': question.option_b,
+                    'C': question.option_c,
+                    'D': question.option_d
+                },
+                'correct_answer': question.correct_answer,
+                'correct_answer_text': getattr(question, f'option_{question.correct_answer.lower()}', ''),
+                'your_answer': user_answer or 'Not Attempted',
+                'your_answer_text': getattr(question, f'option_{user_answer.lower()}', 'Not Attempted') if user_answer else 'Not Attempted',
+                'status': 'correct' if is_correct else ('incorrect' if is_attempted else 'not_attempted')
+            })
+        
+        # Calculate section performance
+        section_percentage = (section_correct / section_total * 100) if section_total > 0 else 0
+        performance = 'excellent' if section_percentage >= 80 else ('good' if section_percentage >= 60 else 'needs_improvement')
+        
+        section_analysis.append({
+            'section_name': section.name,
+            'score_percentage': round(section_percentage, 2),
+            'correct': section_correct,
+            'incorrect': section_attempted - section_correct,
+            'attempted': section_attempted,
+            'total_questions': section_total,
+            'performance': performance
+        })
+    
+    # Return comprehensive analysis
+    return jsonify({
+        'submission_id': submission.id,
+        'test_name': test.name,
+        'submitted_at': submission.submitted_at.isoformat(),
+        'overall_summary': {
+            'score_percentage': submission.score_percentage,
+            'score_points': submission.score_points,
+            'score_total': submission.score_total,
+            'pass_status': 'pass' if submission.score_percentage >= 35 else 'fail',
+            'accuracy': round((correct_answers / attempted * 100), 2) if attempted > 0 else 0,
+            'total_questions': total_questions,
+            'attempted': attempted,
+            'not_attempted': total_questions - attempted,
+            'correct': correct_answers,
+            'incorrect': attempted - correct_answers,
+            'marked_for_review': marked_for_review
+        },
+        'section_analysis': section_analysis,
+        'question_details': question_details
     }), 200
 
 @app.route('/scores', methods=['GET'])
@@ -757,10 +1131,79 @@ def download_scores():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/test-analysis/<int:test_id>', methods=['GET'])
+@jwt_required()
+def get_test_analysis(test_id):
+    """Get comprehensive test analysis including participation metrics"""
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+    
+    if not user or not user.is_admin:
+        return jsonify({'error': 'Admin privileges required'}), 403
+    
+    # Get test
+    test = Test.query.get(test_id)
+    if not test:
+        return jsonify({'error': 'Test not found'}), 404
+    
+    # Get allowed users for this test
+    allowed_user_ids = []
+    if test.allowed_user_ids:
+        try:
+            allowed_user_ids = json.loads(test.allowed_user_ids)
+        except:
+            allowed_user_ids = []
+    
+    total_assigned = len(allowed_user_ids)
+    
+    # Get submissions for this test
+    submissions = Submission.query.filter_by(test_id=test_id).all()
+    
+    # Get unique users who attempted
+    attempted_user_ids = list(set([sub.user.user_id for sub in submissions]))
+    total_attempted = len(attempted_user_ids)
+    
+    # Calculate not attempted
+    not_attempted_user_ids = [uid for uid in allowed_user_ids if uid not in attempted_user_ids]
+    total_not_attempted = len(not_attempted_user_ids)
+    
+    # Get user details for not attempted
+    not_attempted_users = []
+    for user_id in not_attempted_user_ids[:50]:  # Limit to 50 for performance
+        u = User.query.filter_by(user_id=user_id).first()
+        if u:
+            not_attempted_users.append({
+                'user_id': u.user_id,
+                'name': u.name
+            })
+    
+    return jsonify({
+        'test_id': test_id,
+        'test_name': test.name,
+        'participation': {
+            'total_assigned': total_assigned,
+            'total_attempted': total_attempted,
+            'total_not_attempted': total_not_attempted,
+            'attempted_percentage': round((total_attempted / total_assigned * 100) if total_assigned > 0 else 0, 2),
+            'not_attempted_users': not_attempted_users
+        },
+        'submissions': [sub.to_dict() for sub in submissions]
+    }), 200
+
 # Check and update database schema if needed
 def check_database_schema():
     from sqlalchemy import inspect
     inspector = inspect(db.engine)
+    
+    # Check if the test table exists and add allowed_user_ids column if missing
+    if 'test' in inspector.get_table_names():
+        columns = [column['name'] for column in inspector.get_columns('test')]
+        if 'allowed_user_ids' not in columns:
+            print("Adding missing allowed_user_ids column to test table...")
+            with db.engine.connect() as connection:
+                connection.execute(db.text("ALTER TABLE test ADD COLUMN allowed_user_ids TEXT"))
+                connection.commit()
+                print("Column added successfully!")
     
     # Check if the question table exists
     if 'question' in inspector.get_table_names():

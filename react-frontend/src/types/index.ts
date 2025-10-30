@@ -40,11 +40,15 @@ export interface Section {
 }
 
 export interface ExamData {
+  test_id?: number;
+  title?: string;
+  description?: string;
+  duration_minutes?: number;
   sections: Section[];
 }
 
 // Question status types
-export type QuestionStatus = 'not-visited' | 'not-answered' | 'answered' | 'marked-for-review';
+export type QuestionStatus = 'not-visited' | 'not-answered' | 'answered' | 'marked-for-review' | 'answered-marked';
 
 export interface QuestionState {
   id: number;
@@ -57,9 +61,16 @@ export interface AnswersMap {
   [questionId: string]: string;
 }
 
+// Submission data structure with optional question states for analysis
 export interface SubmissionData {
   user_id: string;
   answers: AnswersMap;
+  test_id?: number;
+  question_states?: {
+    [questionId: string]: {
+      marked_for_review: boolean;
+    };
+  };
 }
 
 export interface ScoreResult {

@@ -15,9 +15,16 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   
   // Handle answer selection
   const handleOptionSelect = (option: string) => {
+    const currentStatus = questionState?.status || 'not-visited';
+    
+    // If already marked for review, change to 'answered-marked', else just 'answered'
+    const newStatus = (currentStatus === 'marked-for-review') 
+      ? 'answered-marked' 
+      : 'answered';
+    
     updateQuestionState(
       question.id, 
-      'answered', 
+      newStatus, 
       option
     );
   };
@@ -25,9 +32,17 @@ const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   // Handle mark for review
   const handleMarkForReview = () => {
     const currentStatus = questionState?.status || 'not-visited';
-    const newStatus = currentStatus === 'marked-for-review' 
-      ? (questionState?.answer ? 'answered' : 'not-answered')
-      : 'marked-for-review';
+    const hasAnswer = !!questionState?.answer;
+    
+    let newStatus: 'answered' | 'not-answered' | 'marked-for-review' | 'answered-marked' | 'not-visited';
+    
+    if (currentStatus === 'marked-for-review' || currentStatus === 'answered-marked') {
+      // Unmarking: if has answer, set to 'answered', else 'not-answered'
+      newStatus = hasAnswer ? 'answered' : 'not-answered';
+    } else {
+      // Marking: if has answer, set to 'answered-marked', else 'marked-for-review'
+      newStatus = hasAnswer ? 'answered-marked' : 'marked-for-review';
+    }
     
     updateQuestionState(
       question.id,
