@@ -75,7 +75,12 @@ export const ExamProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const loadExamData = async () => {
       if (user && !examData && localStorage.getItem('token')) {
         try {
-          const data = await fetch('http://localhost:5000/questions', {
+          // Use Render URL in production, localhost in development
+          const apiUrl = process.env.NODE_ENV === 'production' 
+            ? 'https://rompitoe.onrender.com/questions'
+            : 'http://localhost:5000/questions';
+            
+          const data = await fetch(apiUrl, {
             headers: {
               'Authorization': `Bearer ${localStorage.getItem('token')}`
             }

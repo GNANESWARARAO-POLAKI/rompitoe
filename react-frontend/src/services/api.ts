@@ -351,9 +351,13 @@ export const apiService = {
       // Get the token from localStorage
       const token = localStorage.getItem('token');
 
+      // Use production URL or local URL based on environment
+      const baseUrl = getBaseURL();
+      const downloadUrl = `${baseUrl}/download-scores`;
+
       // Create a link and download the file with authorization header
       const a = document.createElement('a');
-      a.href = `http://localhost:5000/download-scores`;
+      a.href = downloadUrl;
       a.download = 'exam_scores.csv';
 
       // Create an AJAX request with the authorization header
