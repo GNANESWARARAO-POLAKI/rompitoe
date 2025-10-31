@@ -1,4 +1,4 @@
-# 🎓 EAMCET Online Exam Platform
+# 🎓 Rompit-OE Platform
 
 A full-stack web application for conducting online examinations with bilingual support (English & Telugu), real-time scoring, and admin management.
 
@@ -474,3 +474,4 @@ This project is private and proprietary.
 For issues or questions, please create an issue in the GitHub repository.
 
 **Happy Coding! 🚀**
+
