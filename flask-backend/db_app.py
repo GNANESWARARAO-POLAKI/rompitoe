@@ -536,8 +536,19 @@ def upload_files():
         
         for _, row in users_df.iterrows():
             user_id = str(row.get('user_id'))
-            dob = str(row.get('dob'))
-            name = row.get('name', '')
+            
+            # Handle date formatting - Excel dates come with timestamp
+            dob_value = row.get('dob')
+            if pd.notna(dob_value):
+                # Convert to datetime if not already, then format as YYYY-MM-DD
+                if isinstance(dob_value, str):
+                    dob = pd.to_datetime(dob_value).strftime('%Y-%m-%d')
+                else:
+                    dob = dob_value.strftime('%Y-%m-%d')
+            else:
+                dob = ''
+            
+            name = str(row.get('name', ''))
             
             # Add to allowed users list for this test
             allowed_user_ids.append(user_id)
