@@ -15,13 +15,8 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # Configure app
-# Always use Neon PostgreSQL database (no SQLite fallback)
-db_url = os.environ.get('DATABASE_URL')
-if not db_url:
-    # Hardcoded Neon database URL if environment variable not set
-    db_url = 'postgresql://neondb_owner:npg_ETjaJbR48Ovl@ep-tiny-smoke-a4uifbri-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require'
-
-app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+# Force use of Neon PostgreSQL database (ignore Render's DATABASE_URL)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://neondb_owner:npg_ETjaJbR48Ovl@ep-tiny-smoke-a4uifbri-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = 'your-secret-key-change-in-production'  # Change this in production
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)  # Shorter expiration for security
@@ -586,15 +581,16 @@ def upload_files():
             # Add questions from this sheet
             for idx, row in sheet_df.iterrows():
                 # Set section_order to be 1-based index within section
+                # Convert all values to strings to handle numeric values in Excel
                 question = Question(
                     section_id=section.id,
                     section_order=idx + 1,  # Make it 1-based
-                    question_text=row.get('question', ''),
-                    option_a=row.get('option_a', ''),
-                    option_b=row.get('option_b', ''),
-                    option_c=row.get('option_c', ''),
-                    option_d=row.get('option_d', ''),
-                    correct_answer=row.get('correct_answer', '')
+                    question_text=str(row.get('question', '')),
+                    option_a=str(row.get('option_a', '')),
+                    option_b=str(row.get('option_b', '')),
+                    option_c=str(row.get('option_c', '')),
+                    option_d=str(row.get('option_d', '')),
+                    correct_answer=str(row.get('correct_answer', ''))
                 )
                 db.session.add(question)
                 questions_count += 1
